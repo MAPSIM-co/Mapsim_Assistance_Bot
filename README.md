@@ -66,6 +66,14 @@ Launch the software before starting MetaTrader 5.
 
 - Go to [Mapsim Bot](https://telegram.me/Tarantula_trade_chBot)
 
+* Go to Account Status
+
+* Insert your SERIAL NUMBER in The Back your Mapsim Device
+
+* Add you Account Number from the your Broker 
+
+*Send your Request 
+
 - Receive Your License 
 
 - Inser License To Expert In MetaTrader 5
