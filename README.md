@@ -62,6 +62,18 @@ Launch the software before starting MetaTrader 5.
 
 ---
 
+**Step 4: Get The License Expert**
+
+- Go to [Mapsim Bot](https://telegram.me/Tarantula_trade_chBot)
+
+- Receive Your License 
+
+- Inser License To Expert In MetaTrader 5
+
+* Activation Mapsim Assistance Bot 
+
+---
+
 ## How It Works
 
 Connect: Plug in the Mapsim Device and launch the Mapsim Device Software.
