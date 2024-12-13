@@ -46,8 +46,18 @@ Restart MetaTrader 5 to load the Expert Advisor.
 
 **Step 3: Set Up the Mapsim Device Software**
 
-Download and install the Mapsim Device Software from here.
+Download and install the Mapsim Device Software Setting from here:
+
+* [From Windows 7](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_Windows7)
+
+* [From mcOS](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_MACOS)
+
+
 Connect the Mapsim Device to your computer via USB.
+
+* Installation USB Driver For Windows 7 In The Zip File
+
+
 Launch the software before starting MetaTrader 5.
 
 ---
