@@ -74,9 +74,9 @@ Launch the software before starting MetaTrader 5.
 
 * Send your Request 
 
-- * Receive Your License 
+- [Receive Your License] 
 
-- * Inser License To Expert In MetaTrader 5
+- [Insert your License To Expert In MetaTrader 5]
 
 * Activation Mapsim Assistance Bot 
 
