@@ -86,6 +86,8 @@ For technical support or inquiries, please contact:
 
 Email: **support@mapsim.com**
 
-Website: **www.mapsim.com**
+Website: **www.mapsim.xyz**
+
+Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot)
 
 
