@@ -84,7 +84,7 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 For technical support or inquiries, please contact:
 
-Email: **support@mapsim.com**
+Email: **support@mapsim.xyz**
 
 Website: **www.mapsim.xyz**
 
