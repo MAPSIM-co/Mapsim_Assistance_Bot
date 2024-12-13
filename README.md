@@ -66,7 +66,9 @@ Launch the software before starting MetaTrader 5.
 
 - Go to [Mapsim Bot](https://telegram.me/Tarantula_trade_chBot)
 
-* Go to Account Status
+* Go to Account Status Menu 
+
+  * Follow Bot Commands 
 
 * Insert your SERIAL NUMBER in The Back your Mapsim Device
 
