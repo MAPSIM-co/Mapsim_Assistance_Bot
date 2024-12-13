@@ -72,11 +72,11 @@ Launch the software before starting MetaTrader 5.
 
 * Add you Account Number from the your Broker 
 
-*Send your Request 
+* Send your Request 
 
-- Receive Your License 
+- * Receive Your License 
 
-- Inser License To Expert In MetaTrader 5
+- * Inser License To Expert In MetaTrader 5
 
 * Activation Mapsim Assistance Bot 
 
