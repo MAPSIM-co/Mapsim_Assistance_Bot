@@ -82,6 +82,12 @@ Launch the software before starting MetaTrader 5.
 
 * Activation Mapsim Assistance Bot 
 
+**You Can After Make your License,Go to This Link for watch Active License:**
+
+   [Watch Active Your License ](https://mapsim.xyz/login.php)
+
+ - You can Entery From Site By Your User Name And Password From Bot
+
 ---
 
 ## How It Works
