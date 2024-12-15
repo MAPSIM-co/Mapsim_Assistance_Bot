@@ -101,6 +101,7 @@ Launch the software before starting MetaTrader 5.
 ## How It Works
 
 Connect: Plug in the Mapsim Device and launch the Mapsim Device Software.
+
 Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bot Expert to your desired chart.
 
 **Interact: Use the hardware device to execute trading actions like Buy, Sell,Partial Position,or Close with precision.**
