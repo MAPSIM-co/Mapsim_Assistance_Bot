@@ -103,6 +103,12 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 ## Requirements
 
 - Operating System: Windows 7 or later And macOS
+
+- Driver Mapsim Device For Windows 7
+
+- Mapsim Device Assistance Bot Version 1-006
+
+- License Activation Key
   
 - MetaTrader Version: MetaTrader 5
   
