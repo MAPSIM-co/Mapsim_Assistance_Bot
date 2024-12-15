@@ -44,7 +44,7 @@ Restart MetaTrader 5 to load the Expert Advisor.
 
 ---
 
-**Step 3: Set Up the Mapsim Device Software**
+**Step 3: Set Up the Mapsim Device Software Setting**
 
 Download and install the Mapsim Device Software Setting from here:
 
