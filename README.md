@@ -70,9 +70,11 @@ Launch the software before starting MetaTrader 5.
 
   * Follow Bot Commands 
 
-* Insert your SERIAL NUMBER in The Back your Mapsim Device
+* Insert Your SERIAL NUMBER in The Your Mapsim Device **(QR Code & Barcod & Text)**
 
-* Add you Account Number from the your Broker 
+* Add you Account Number from the your Broker
+
+     - (🚨 You Can ONLY Get 2 Licenses Per Device On Your Broker Account Number 🚨)
 
 * Send your Request 
 
