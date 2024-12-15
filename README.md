@@ -33,6 +33,10 @@ Helps automate and streamline trading actions using the Mapsim Device.
 Navigate to the Releases section on this repository.
 Download the latest version of the Mapsim Assistance Bot Expert file.
 
+Or
+
+Download **[Zip File Expert](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/archive/refs/heads/main.zip)**
+
 ---
 
 **Step 2: Install the Expert Advisor**
