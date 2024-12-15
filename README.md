@@ -64,7 +64,7 @@ Launch the software before starting MetaTrader 5.
 
 **Step 4: Get The License Expert**
 
-- Go to [Mapsim Bot](https://telegram.me/Tarantula_trade_chBot)
+- Go to [Mapsim Bot](https://telegram.me/Tarantula_trade_chBot?start=5580469558)
 
 * Go to Account Status Menu 
 
@@ -124,6 +124,6 @@ Email: **support@mapsim.xyz**
 
 Website: **www.mapsim.xyz**
 
-Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot)
+Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot?start=5580469558)
 
 
