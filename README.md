@@ -46,7 +46,7 @@ Go to File → Open Data Folder.
 Navigate to MQL5/Experts and place the downloaded file here.
 Restart MetaTrader 5 to load the Expert Advisor.
 
-* If you Not Install Meta Trader 5 , You Can Download Free Meta Trader 5 From [here](https://www.metatrader5.com/en/download)
+* If you Not Install Meta Trader 5 In Your OS , You Can Download Free Meta Trader 5 From [here](https://www.metatrader5.com/en/download)
 
 ---
 
