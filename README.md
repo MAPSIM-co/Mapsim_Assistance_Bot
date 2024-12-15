@@ -30,7 +30,7 @@ Helps automate and streamline trading actions using the Mapsim Device.
 
 **Step 1: Download the Expert Advisor**
 
-Navigate to the Releases section on this repository.
+Navigate to the File section on this repository.
 Download the latest version of the Mapsim Assistance Bot Expert file.
 
 OR
