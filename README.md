@@ -122,6 +122,11 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 - Hardware Interface: USB
 
 ---
+## UPDATE EXPERT
+
+- Version 1002 is Run ...
+
+---
 
 ## Support
 
