@@ -126,6 +126,8 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 - Version 1002 is Run ...
 
+     - Active Or Not Active Stop lose And Take Profit for Position (True / False  SL Automatic Active And TP Automatic Active)
+
 ---
 
 ## Support
