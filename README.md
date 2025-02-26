@@ -126,7 +126,16 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 - Version 2132502 is Run ...
 
-     - Active Or Not Active Stop lose And Take Profit for Position (True / False  SL Automatic Active And TP Automatic Active)
+     - Day Trade Count Managment
+     - Mommentom Managment
+     - Allow or Not Allow Trade
+     - Calculation Of The Requierd Number Trade (Profit , Count , Partial Profit , ...)
+     - Show Your Allow Volume according to your Risk
+     - Custom Your Input Volume Box and Titel (Size ,XDis , YDis , Color , Font )
+     - Choice Partial 1,2,3
+       .
+       .
+       .
 
 ---
 
