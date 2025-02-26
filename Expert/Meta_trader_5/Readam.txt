@@ -1,1 +1,19 @@
 This Expert Run in Metatrader 5
+# MACos
+---------------------------------------
+Add Include Folder to MT5
+Add Libraries Folder to MT5
+Add Expert File To MT5 (Expert Folder)
+Allow DLL in the Expert
+Entery Liccense And Username , Password 
+Run Mapsim Device APP
+Set Your Config (Managment Risk , Managmet Mony , ...)
+Enjoy ...
+
+# Windows 
+----------------------------------------
+Add Expert File To MT5 (Expert Folder)
+Entery Liccense And Username , Password 
+Run Mapsim Device APP
+Set Your Config (Managment Risk , Managmet Mony , ...)
+Enjoy ...
