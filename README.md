@@ -54,7 +54,7 @@ Restart MetaTrader 5 to load the Expert Advisor.
 
 Download and install the Mapsim Device Software Setting from here:
 
-* [From Windows 7](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_Windows7)
+* [From Windows](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_Windows7)
 
 * [From mcOS](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_MACOS)
 
@@ -124,18 +124,40 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 ---
 ## UPDATE EXPERT
 
-- Version 2132502 is Run ...
+  This Expert Advisor is a highly customizable Forex Trading EA that provides advanced risk management, partial close features,     momentum control, and visual feedback on the chart.
 
-     - Day Trade Count Managment
-     - Mommentom Managment
-     - Allow or Not Allow Trade
-     - Calculation Of The Requierd Number Trade (Profit , Count , Partial Profit , ...)
-     - Show Your Allow Volume according to your Risk
-     - Custom Your Input Volume Box and Titel (Size ,XDis , YDis , Color , Font )
-     - Choice Partial 1,2,3
-       .
-       .
-       .
+- Version 213-26.4 is Run ...
+
+     ## 🔹 Key Features
+      - TP/SL Management
+      - Set Stop Loss (SL) and Take Profit (TP) in pips
+      - Enable or disable automatic SL/TP
+      - Risk & Volume Management
+      - Default lot/contract size
+      - Automatic calculation of allowed trade volume based on account risk
+      - Display allowed volume according to your risk settings
+      - Partial Close Management
+      - Enable/disable partial close for Step 1, Step 2, Step 3
+      - Option to use Trial SL with partial steps
+      - Configure percentage of volume for each partial step and manual partial
+      - Daily Trade Control
+      - Limit number of trades per day (MaxDailyTrades)
+      - Daily profit limit (MaxDailyProfitUSD)
+      - Optional display of trade calculations in the output
+      - Momentum Management
+      - Market momentum calculation for trade eligibility
+      - Trade allowed or blocked based on momentum value
+      - Chart Information Display
+      - Information Box and Volume Box with customizable size, position, font, and color
+      - Daily High & Low lines
+      - OB+ / OB- (Order Block) lines with adjustable style, width, and color
+      - Delivery price lines (High, Low, Open)
+      - Auto Break-Even Mode
+      - Automatic close at break-even
+      - Spread buffer for safe exit
+      - Popup Message Management
+      - Error, warning, and daily P/L popup messages
+      - Fully customizable box size, position, color, font, sound, and display duration
 
 ---
 

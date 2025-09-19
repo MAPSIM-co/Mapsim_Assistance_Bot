@@ -3,7 +3,8 @@ This Expert Run in Metatrader 5
 ---------------------------------------
 Add Include Folder to MT5
 Add Libraries Folder to MT5
-Add Expert File To MT5 (Expert Folder)
+Add Sounds Folder to MT5
+Add Last Expert File To MT5 (Expert Folder)
 Allow DLL in the Expert
 Entery Liccense And Username , Password 
 Run Mapsim Device APP
@@ -12,7 +13,14 @@ Enjoy ...
 
 # Windows 
 ----------------------------------------
+Add Include Folder to MT5
+Add Libraries Folder to MT5
+Add Sounds Folder to MT5
 Add Expert File To MT5 (Expert Folder)
+Allow DLL in the Expert
+********************************************************
+*    Import : (This Option Active For WIN 64 bit)      *
+********************************************************
 Entery Liccense And Username , Password 
 Run Mapsim Device APP
 Set Your Config (Managment Risk , Managmet Mony , ...)
