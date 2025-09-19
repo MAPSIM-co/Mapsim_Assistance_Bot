@@ -61,7 +61,7 @@ Download and install the Mapsim Device Software Setting from here:
 
 Connect the Mapsim Device to your computer via USB.
 
-* Installation USB Driver For Windows 7 In The Zip File
+* Installation USB Driver For Windows 32 or 64 Bit In The Zip File
 
 
 Launch the software before starting MetaTrader 5.
@@ -109,9 +109,9 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 ## Requirements
 
-- Operating System: Windows 7 or later And macOS
+- Operating System: Windows 32/64 Bit or later And macOS
 
-- Driver Mapsim Device For Windows 7
+- Driver Mapsim Device For Windows 32/64 Bit
 
 - Mapsim Device Assistance Bot Version 1-006
 
@@ -128,36 +128,37 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 - Version 213-26.4 is Run ...
 
-     ## 🔹 Key Features
-      - TP/SL Management
-      - Set Stop Loss (SL) and Take Profit (TP) in pips
-      - Enable or disable automatic SL/TP
-      - Risk & Volume Management
-      - Default lot/contract size
-      - Automatic calculation of allowed trade volume based on account risk
-      - Display allowed volume according to your risk settings
-      - Partial Close Management
-      - Enable/disable partial close for Step 1, Step 2, Step 3
-      - Option to use Trial SL with partial steps
-      - Configure percentage of volume for each partial step and manual partial
-      - Daily Trade Control
-      - Limit number of trades per day (MaxDailyTrades)
-      - Daily profit limit (MaxDailyProfitUSD)
-      - Optional display of trade calculations in the output
-      - Momentum Management
-      - Market momentum calculation for trade eligibility
-      - Trade allowed or blocked based on momentum value
-      - Chart Information Display
-      - Information Box and Volume Box with customizable size, position, font, and color
-      - Daily High & Low lines
-      - OB+ / OB- (Order Block) lines with adjustable style, width, and color
-      - Delivery price lines (High, Low, Open)
-      - Auto Break-Even Mode
-      - Automatic close at break-even
-      - Spread buffer for safe exit
-      - Popup Message Management
-      - Error, warning, and daily P/L popup messages
-      - Fully customizable box size, position, color, font, sound, and display duration
+  ## 🔹 Key Features
+  
+    - TP/SL Management
+    - Set Stop Loss (SL) and Take Profit (TP) in pips
+    - Enable or disable automatic SL/TP
+    - Risk & Volume Management
+    - Default lot/contract size
+    - Automatic calculation of allowed trade volume based on account risk
+    - Display allowed volume according to your risk settings
+    - Partial Close Management
+    - Enable/disable partial close for Step 1, Step 2, Step 3
+    - Option to use Trial SL with partial steps
+    - Configure percentage of volume for each partial step and manual partial
+    - Daily Trade Control
+    - Limit number of trades per day (MaxDailyTrades)
+    - Daily profit limit (MaxDailyProfitUSD)
+    - Optional display of trade calculations in the output
+    - Momentum Management
+    - Market momentum calculation for trade eligibility
+    - Trade allowed or blocked based on momentum value
+    - Chart Information Display
+    - Information Box and Volume Box with customizable size, position, font, and color
+    - Daily High & Low lines
+    - OB+ / OB- (Order Block) lines with adjustable style, width, and color
+    - Delivery price lines (High, Low, Open)
+    - Auto Break-Even Mode
+    - Automatic close at break-even
+    - Spread buffer for safe exit
+    - Popup Message Management
+    - Error, warning, and daily P/L popup messages
+    - Fully customizable box size, position, color, font, sound, and display duration
 
 ---
 
