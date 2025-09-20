@@ -18,7 +18,7 @@
     <img src="https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Product/Mapsim_Device_V1.png" 
          alt="Mapsim Device" 
          width="300" 
-         height="300" 
+         height="500" 
          style="object-fit: cover;">
   </div>
 
