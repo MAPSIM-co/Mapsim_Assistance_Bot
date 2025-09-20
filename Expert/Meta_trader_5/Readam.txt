@@ -1,7 +1,7 @@
 This Expert Run in Metatrader 5
 # MACos
 ---------------------------------------
-Add Include Folder to MT5
+Extract (Mapsim_Assistance_Bot_lnclude.zip) Folder And Added (Mapsim_Assistance_Bot_lnclude) To Include Folder to MT5
 Add Libraries Folder to MT5
 Add Sounds Folder to MT5
 Add Last Expert File To MT5 (Expert Folder)
