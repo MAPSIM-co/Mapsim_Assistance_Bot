@@ -219,4 +219,6 @@ Website: **www.mapsim.xyz**
 
 Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot?start=5580469558)
 
+## License 
 
+MIT License: [**MIT**](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/#)
