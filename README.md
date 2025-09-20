@@ -22,6 +22,15 @@
          style="object-fit: cover;">
   </div>
 
+- **Mapsim Device Software** :
+
+  <div style="text-align: center;">
+    <img src="https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Product/Mapsim_Device_Software.png" 
+         alt="Mapsim Device" 
+         width="400" 
+         height="600" 
+         style="object-fit: cover;">
+  </div>
 - **Mapsim Assistance Bot Expert** :
 
   <div style="text-align: center;">
