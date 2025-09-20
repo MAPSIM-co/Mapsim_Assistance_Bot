@@ -49,15 +49,15 @@ OR
 
 Now copy the files from the downloaded package into the correct folders:
 
-* 📂 Experts → copy file inside Experts → to → **MQL5/Experts/**
+* 📂 **Experts** → copy file inside Experts → to → **MQL5/Experts/**
 
-  * ⚠️ Important:
+  * ⚠️ Important:(maCOS / Windows Folders)
 
       **If you are on Windows (32/64 bit) or macOS, make sure to copy the Expert file that matches your operating system into the MQL5/Experts/File.**
 
-* 📂 Include → copy folder **(Mapsim_Assistance_Bot_lnclude)** inside this → to → **MQL5/Include/**
-* 📂 Libraries → copy file inside Libraries → to → **MQL5/Libraries/**
-* 📂 Sounds → copy **(Mapsim_Assistance_Bot)** folder inside this → to → **MetaTrader 5/Sounds/**
+* 📂 **Include** → copy folder **(Mapsim_Assistance_Bot_lnclude)** inside this → to → **MQL5/Include/**
+* 📂 **Libraries** → copy file inside Libraries → to → **MQL5/Libraries/**
+* 📂 **Sounds** → copy **(Mapsim_Assistance_Bot)** folder inside this → to → **MetaTrader 5/Sounds/**
 
 * Restart MetaTrader 5 to load the Expert Advisor.
 
