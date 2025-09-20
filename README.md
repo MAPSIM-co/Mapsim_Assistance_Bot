@@ -57,7 +57,7 @@ Now copy the files from the downloaded package into the correct folders:
 
 * 📂 Include → copy folder **(Mapsim_Assistance_Bot_lnclude)** inside this → to → **MQL5/Include/**
 * 📂 Libraries → copy file inside Libraries → to → **MQL5/Libraries/**
-* 📂 Sounds → copy all **(Mapsim_Assistance_Bot)** folder inside this → to → **MetaTrader 5/Sounds/**
+* 📂 Sounds → copy **(Mapsim_Assistance_Bot)** folder inside this → to → **MetaTrader 5/Sounds/**
 
 * Restart MetaTrader 5 to load the Expert Advisor.
 
