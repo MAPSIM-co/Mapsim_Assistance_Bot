@@ -14,7 +14,8 @@
 
 - Mapsim Device :
   
-  ![image](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/blob/main/Product/Mapsim_Device_V1.png)
+  ![image](https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Product/Mapsim_Device_V1.png)
+
 
 ## Features
 
