@@ -56,7 +56,7 @@ Now copy the files from the downloaded package into the correct folders:
 
 * ⚠️ Important:
 
-**(If you are on Windows (32/64 bit) or macOS, make sure to copy the Expert file that matches your operating system into the MQL5/Experts/ folder.)**
+    **(If you are on Windows (32/64 bit) or macOS, make sure to copy the Expert file that matches your operating system into the MQL5/Experts/ folder.)**
 
 
 Restart MetaTrader 5 to load the Expert Advisor.
