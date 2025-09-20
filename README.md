@@ -41,9 +41,9 @@ OR
 
 **Step 2: Install the Expert Advisor**
 
-Open MetaTrader 5.
-Go to File → Open Data Folder.
-Navigate to :
+* Open MetaTrader 5.
+* Go to File → Open Data Folder.
+* Navigate to :
 
   **Metatrader5/MQL5** 
 
