@@ -10,6 +10,11 @@
 
     **Mapsim Assistance Bot Expert** (Expert Advisor for MetaTrader 5)
 
+## Product
+
+- Mapsim Device :
+  
+  ![image](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/Product/Mapsim_Device_V1.png)
 
 ## Features
 
