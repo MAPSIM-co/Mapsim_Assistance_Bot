@@ -128,7 +128,7 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 - Driver Mapsim Device For Windows 32/64 Bit
 
-- Mapsim Device Assistance Bot Version 1-006
+- Mapsim Device Assistance Bot (213-*) Version
 
 - License Activation Key
   
@@ -139,7 +139,7 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 ---
 ## UPDATE EXPERT
 
-  This Expert Advisor is a highly customizable Forex Trading EA that provides advanced risk management, partial close features,     momentum control, and visual feedback on the chart.
+  This Expert Advisor is a highly customizable Forex Trading EA that provides advanced risk management, partial close features,momentum control, and visual feedback on the chart.
 
 - Version 213-26.4 is Run ...
 
