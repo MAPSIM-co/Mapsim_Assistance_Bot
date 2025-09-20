@@ -14,7 +14,7 @@
 
 - Mapsim Device :
   
-  <img src="https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Product/Mapsim_Device_V1.png" alt="Mapsim Device" width="600">
+  <img src="https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Product/Mapsim_Device_V1.png" alt="Mapsim Device" width="300">
 
 
 
