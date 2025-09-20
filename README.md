@@ -56,12 +56,12 @@ Now copy the files from the downloaded package into the correct folders:
 
 * ⚠️ Important:
 
-    **If you are on Windows (32/64 bit) or macOS, make sure to copy the Expert file that matches your operating system into the MQL5/Experts/ folder.**
+    **If you are on Windows (32/64 bit) or macOS, make sure to copy the Expert file that matches your operating system into the MQL5/Experts/File.**
 
 
 * Restart MetaTrader 5 to load the Expert Advisor.
 
-    * If you Not Install Meta Trader 5 In Your OS , You Can Download Free Meta Trader 5 From [here](https://www.metatrader5.com/en/download)
+  * If you Not Install Meta Trader 5 In Your OS , You Can Download Free Meta Trader 5 From **[here](https://www.metatrader5.com/en/download)**
 
 ---
 
