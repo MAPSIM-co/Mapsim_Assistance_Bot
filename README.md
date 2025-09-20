@@ -221,4 +221,4 @@ Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot?start=55804
 
 ## License 
 
-MIT License: [**MIT**](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/#)
+MIT License: [**MIT**](https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/LICENSE)
