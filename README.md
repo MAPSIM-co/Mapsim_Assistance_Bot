@@ -213,9 +213,9 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 For technical support or inquiries, please contact:
 
-Email: **support@mapsim.xyz**
+Email: **support@mapsimco.sbs**
 
-Website: **www.mapsim.xyz**
+Website: **www.mapsimco.sbs**
 
 Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot?start=5580469558)
 
