@@ -173,7 +173,7 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
   This Expert Advisor is a highly customizable Forex Trading EA that provides advanced risk management, partial close features,momentum control, and visual feedback on the chart.
 
-- Version 213-26.4 is Run ...
+- Version V213.1.6 is Run ...
 
   ## 🔹 Key Features
   
