@@ -138,7 +138,7 @@ Launch the software before starting MetaTrader 5.
 
 **You Can After Make your License,Go to This Link for watch Active License:**
 
-   [Watch Active Your License ](https://mapsim.xyz/login.php)
+   [Watch Active Your License ](https://mapsimco.sbs/login.php)
 
  - You can Entery From Site By Your User Name And Password From Bot
 
@@ -172,7 +172,7 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
   This Expert Advisor is a highly customizable Forex Trading EA that provides advanced risk management, partial close features,momentum control, and visual feedback on the chart.
 
-- Version 213-26.4 is Run ...
+- Version V213.1.6 is Run ...
 
   ## 🔹 Key Features
   
@@ -212,9 +212,9 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 
 For technical support or inquiries, please contact:
 
-Email: **support@mapsim.xyz**
+Email: **support@mapsimco.sbs**
 
-Website: **www.mapsim.xyz**
+Website: **www.mapsimco.sbs**
 
 Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot?start=5580469558)
 
