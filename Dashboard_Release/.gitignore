@@ -1,0 +1,15 @@
+.venv/
+.build/
+dist/
+build/
+package/
+*.spec
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+
+# Never commit exported secrets or live snapshots.
+*.evd
+.env
+snapshot.json

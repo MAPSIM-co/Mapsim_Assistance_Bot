@@ -1,0 +1,236 @@
+name: dashboard-build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "dashboard-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dashboard-build-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: Dashboard_Release
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macos-arm64
+            zip: MapsimDashboard-macos-arm64.zip
+          - os: macos-15-intel
+            label: macos-x64
+            zip: MapsimDashboard-macos-x64.zip
+          - os: windows-latest
+            label: windows-x64
+            zip: MapsimDashboard-windows-x64.zip
+          - os: ubuntu-22.04
+            label: linux-x64
+            zip: MapsimDashboard-linux-x64.tar.gz
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout private dashboard source
+        if: vars.SOURCE_REPO != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SOURCE_REPO }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require the private source repository
+        if: vars.SOURCE_REPO == ''
+        run: |
+          echo "::error::Set repository variable SOURCE_REPO (owner/repo) and secret SOURCE_REPO_TOKEN so the source stays private."
+          exit 1
+
+      - name: Resolve source folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$GITHUB_WORKSPACE/source"
+          if [ -n "${{ vars.SOURCE_SUBPATH }}" ]; then
+            src="$src/${{ vars.SOURCE_SUBPATH }}"
+          fi
+          if [ ! -f "$src/live_dashboard.py" ]; then
+            echo "::error::live_dashboard.py not found in $src. Check SOURCE_SUBPATH."
+            exit 1
+          fi
+          echo "SOURCE_DIR=$src" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: Dashboard_Release/requirements-build.txt
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Detect signing credentials
+        id: signing
+        shell: bash
+        env:
+          MACOS_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          WINDOWS_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+        run: |
+          if [ -n "$MACOS_P12" ]; then echo "macos=1" >> "$GITHUB_OUTPUT"; else echo "macos=0" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "$WINDOWS_PFX" ]; then echo "windows=1" >> "$GITHUB_OUTPUT"; else echo "windows=0" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS' && steps.signing.outputs.macos == '1'
+        shell: bash
+        env:
+          CERT_P12_B64: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          cert="$RUNNER_TEMP/cert.p12"
+          printf '%s' "$CERT_P12_B64" | base64 -D > "$cert"
+          security create-keychain -p mapsim "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p mapsim "$keychain"
+          security import "$cert" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k mapsim "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          echo "MAPSIM_CODESIGN_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Import Windows signing certificate
+        if: runner.os == 'Windows' && steps.signing.outputs.windows == '1'
+        shell: bash
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/signing"
+          printf '%s' "$PFX_B64" | base64 --decode > "$RUNNER_TEMP/signing/cert.pfx"
+          echo "PFX_PATH=$RUNNER_TEMP/signing/cert.pfx" >> "$GITHUB_ENV"
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python build.py --source "$SOURCE_DIR" --out dist --name MapsimDashboard
+
+      - name: Sign Windows binary
+        if: runner.os == 'Windows' && steps.signing.outputs.windows == '1'
+        shell: pwsh
+        env:
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found" }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            /f "$env:PFX_PATH" /p "$env:PFX_PASSWORD" "dist\MapsimDashboard.exe"
+
+      - name: Notarize macOS app
+        if: runner.os == 'macOS' && steps.signing.outputs.macos == '1'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent "dist/MapsimDashboard.app" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "dist/MapsimDashboard.app"
+          xcrun stapler validate "dist/MapsimDashboard.app"
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ runner.os }}" in
+            macOS) artifact="dist/MapsimDashboard.app" ;;
+            Windows) artifact="dist/MapsimDashboard.exe" ;;
+            *) artifact="dist/MapsimDashboard" ;;
+          esac
+          python smoke_test.py --artifact "$artifact"
+
+      - name: Package macOS artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          ditto -c -k --keepParent "dist/MapsimDashboard.app" "package/${{ matrix.zip }}"
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          Compress-Archive -Path "dist\MapsimDashboard.exe" -DestinationPath "package\${{ matrix.zip }}" -Force
+
+      - name: Package Linux artifact
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          tar -C dist -czf "package/${{ matrix.zip }}" MapsimDashboard
+
+      - name: Write checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd package
+          if command -v sha256sum > /dev/null 2>&1; then
+            sha256sum "${{ matrix.zip }}" > "${{ matrix.zip }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.zip }}" > "${{ matrix.zip }}.sha256"
+          fi
+          cat "${{ matrix.zip }}.sha256"
+
+      - name: Clean up macOS keychain
+        if: runner.os == 'macOS' && always()
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" > /dev/null 2>&1 || true
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: Dashboard_Release/package/*
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    if: startsWith(github.ref, 'refs/tags/dashboard-v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
