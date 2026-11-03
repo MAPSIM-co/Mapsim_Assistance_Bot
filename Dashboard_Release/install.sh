@@ -121,7 +121,9 @@ write_wrapper() {
 #!/bin/sh
 # Mapsim Live Dashboard launcher - loads $ENV_FILE if present.
 if [ -f "\$HOME/.config/mapsim-dashboard/mapsim-dashboard.env" ]; then
+  set -a
   . "\$HOME/.config/mapsim-dashboard/mapsim-dashboard.env"
+  set +a
 fi
 exec "$exec_target" --bind "\${MAPSIM_DASHBOARD_BIND:-127.0.0.1}" "\$@"
 EOF
