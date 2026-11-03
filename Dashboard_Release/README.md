@@ -128,6 +128,12 @@ version, the access mode/port, whether the live snapshot file is being read
                                      snapshot.json` is derived from it
  13) Exit
 
+Inside any of these options, type **0** (or `b` / `back` / `q`) at a prompt to
+leave it and return to the main menu. Nothing is changed when you do that — the
+running dashboard, the saved settings and MetaTrader 5 stay untouched. This
+works for the folder, port, password and path prompts and for every yes/no
+question.
+
 ### Snapshot / data source
 
 The dashboard only reads files — it never writes to MetaTrader. It looks for

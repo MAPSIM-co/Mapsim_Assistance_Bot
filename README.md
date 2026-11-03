@@ -227,6 +227,9 @@ The same actions are also available as installer flags (`--public`,
   type the file, the MQL5 folder or the MT5 folder itself — Windows-style paths
   such as `C:\Program Files\MetaTrader 5` are translated to the right
   `drive_c` folder automatically.
+- **Leave any option and go back** — inside every menu option, type `0` (or
+  `b` / `back` / `q`) at a prompt to return to the main menu without changing
+  anything.
 - **Remove everything** — `Mapsim_BOT` menu 8 (or `install.sh --uninstall` /
   `install.ps1 -Uninstall`) deletes the app, the auto-start service, the
   password file and all logs. Nothing touches MetaTrader 5.

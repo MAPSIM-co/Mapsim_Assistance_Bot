@@ -291,8 +291,11 @@ pick_wine_prefix() {
       i=$((i + 1))
     done
     IFS=$old_ifs
-    printf 'choose 1-%s: ' "$count" >&2
+    printf 'choose 1-%s (0 = back): ' "$count" >&2
     IFS= read -r pick || return 1
+    if wants_back "$pick"; then
+      return 1
+    fi
     i=1
     old_ifs=$IFS
     IFS='
@@ -309,9 +312,12 @@ pick_wine_prefix() {
     echo "error: invalid choice." >&2
     return 1
   fi
-  printf 'Wine prefix folder (the one that contains drive_c, e.g. ~/mt5): ' >&2
+  printf 'Wine prefix folder that contains drive_c, e.g. ~/mt5 (0 = back): ' >&2
   IFS= read -r dir || return 1
   dir=$(printf '%s' "$dir" | sed "s/^'//; s/'$//")
+  if wants_back "$dir"; then
+    return 1
+  fi
   if [ ! -d "$dir/drive_c" ]; then
     echo "error: no drive_c inside: $dir" >&2
     return 1
@@ -839,6 +845,15 @@ ask_default() {
   [ -n "$a" ] && echo "$a" || echo "$d"
 }
 
+# Every submenu prompt accepts 0 (or b/back/q) to leave the submenu and go
+# back to the main menu without changing anything.
+wants_back() {
+  case "$1" in
+    0|0\)|b|B|back|BACK|Back|q|Q|quit|QUIT) return 0 ;;
+  esac
+  return 1
+}
+
 # ---------------------------------------------------------------- expert advisor
 
 EA_STATE="$CONFIG_DIR/ea-state.env"
@@ -928,7 +943,25 @@ ea_install() {
   IFS=$old_ifs
   total=$((n - 1))
   if [ "$total" -gt 1 ]; then
-    sel=$(ask_default "1" "choose 1-$total (or 'a' for all)")
+    while true; do
+      sel=$(ask_default "1" "choose 1-$total (or 'a' for all, 0 = back)")
+      if wants_back "$sel"; then
+        echo "back to the main menu."
+        return 1
+      fi
+      case "$sel" in
+        a|A) break ;;
+        ''|*[!0-9]*)
+          echo "error: choose a number between 1 and $total (or 'a')." >&2
+          ;;
+        *)
+          if [ "$sel" -ge 1 ] && [ "$sel" -le "$total" ]; then
+            break
+          fi
+          echo "error: choose a number between 1 and $total (or 'a')." >&2
+          ;;
+      esac
+    done
   else
     sel="1"
   fi
@@ -1006,7 +1039,11 @@ menu_ea_install() {
   fi
   cur=$(ea_installed_version)
   if [ -n "$cur" ] && [ "$cur" = "$latest" ]; then
-    a=$(ask_default "y" "version $cur is already installed - reinstall? (y/n)")
+    a=$(ask_default "y" "version $cur is already installed - reinstall? (y/n, 0 = back)")
+    if wants_back "$a"; then
+      echo "back to the main menu."
+      return
+    fi
     [ "$a" != "y" ] && [ "$a" != "Y" ] && return
   fi
   ea_install "$latest"
@@ -1026,7 +1063,11 @@ menu_ea_status() {
   if [ -n "$latest" ]; then
     echo "latest version    : $latest"
     if [ -n "$cur" ] && [ "$cur" != "$latest" ]; then
-      a=$(ask_default "y" "a newer version is available - install it now? (y/n)")
+      a=$(ask_default "y" "a newer version is available - install it now? (y/n, 0 = back)")
+      if wants_back "$a"; then
+        echo "back to the main menu."
+        return
+      fi
       if [ "$a" = "y" ] || [ "$a" = "Y" ]; then
         ea_install "$latest"
       fi
@@ -1066,14 +1107,17 @@ prompt_password() {
   existing=$(current_password)
   while true; do
     if [ -n "$existing" ]; then
-      printf 'password (press Enter to keep the current one): ' >&2
+      printf 'password (press Enter to keep the current one, 0 = back): ' >&2
     else
-      printf 'password (min 8 characters): ' >&2
+      printf 'password (min 8 characters, 0 = back): ' >&2
     fi
     stty -echo 2>/dev/null || true
     IFS= read -r p1 || p1=""
     stty echo 2>/dev/null || true
     echo "" >&2
+    if wants_back "$p1"; then
+      return 1
+    fi
     if [ -z "$p1" ] && [ -n "$existing" ]; then
       echo "$existing"
       return
@@ -1088,11 +1132,14 @@ prompt_password() {
       echo "too short - at least 8 characters." >&2
       continue
     fi
-    printf 'repeat password: ' >&2
+    printf 'repeat password (0 = back): ' >&2
     stty -echo 2>/dev/null || true
     IFS= read -r p2 || p2=""
     stty echo 2>/dev/null || true
     echo "" >&2
+    if wants_back "$p2"; then
+      return 1
+    fi
     if [ "$p1" != "$p2" ]; then
       echo "passwords do not match, try again." >&2
       continue
@@ -1103,14 +1150,35 @@ prompt_password() {
 }
 
 choose_port() {
-  p=$(ask_default "8765" "port")
+  p=$(ask_default "8765" "port (0 = back)")
   while true; do
+    if wants_back "$p"; then
+      return 1
+    fi
+    case "$p" in
+      ''|*[!0-9]*)
+        echo "error: port must be a number between 1 and 65535." >&2
+        p=$(ask_default "8765" "port (0 = back)")
+        continue
+        ;;
+    esac
+    if [ "$p" -lt 1 ] || [ "$p" -gt 65535 ]; then
+      echo "error: port must be between 1 and 65535." >&2
+      p=$(ask_default "8765" "port (0 = back)")
+      continue
+    fi
+    # Our own running dashboard already owns its port; switching to it needs
+    # no "busy" complaint.
+    if [ "$p" = "$(current_port)" ] && [ -n "$(dashboard_pid)" ]; then
+      echo "$p"
+      return 0
+    fi
     if ! port_listening "$p"; then
       echo "$p"
-      return
+      return 0
     fi
     echo "port $p is busy." >&2
-    p=$(ask_default "$((p + 1))" "choose another port")
+    p=$(ask_default "$((p + 1))" "choose another port (0 = back)")
   done
 }
 
@@ -1122,26 +1190,40 @@ menu_start() {
   echo "how should the dashboard be reachable?"
   echo "  1) local only   (this computer, http://127.0.0.1)"
   echo "  2) internet     (any device + this computer, protected by a password)"
-  m=$(ask_default "1" "choose 1 or 2")
+  m=$(ask_default "1" "choose 1 or 2 (0 = back)")
+  if wants_back "$m"; then
+    echo "back to the main menu."
+    return
+  fi
   if [ "$m" = "2" ]; then
     bind="0.0.0.0"
-    password=$(prompt_password)
+    if ! password=$(prompt_password); then
+      echo "back to the main menu."
+      return
+    fi
   else
     bind="127.0.0.1"
     password=$(current_password || true)
     [ -z "$password" ] && password=$(gen_password)
   fi
+  if ! port=$(choose_port); then
+    echo "back to the main menu."
+    return
+  fi
   old_pid=$(dashboard_pid)
   if [ -n "$old_pid" ]; then
     echo "the dashboard is already running (pid $old_pid, port $(current_port), bind $(current_bind || echo 127.0.0.1))."
-    a=$(ask_default "y" "stop it and restart with the new settings? (y/n)")
+    a=$(ask_default "y" "stop it and restart with the new settings? (y/n, 0 = back)")
+    if wants_back "$a"; then
+      echo "back to the main menu."
+      return
+    fi
     if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
       echo "cancelled - the running dashboard was not changed."
       return
     fi
     stop_dashboard
   fi
-  port=$(choose_port)
   start_dashboard "$bind" "$password" "$port"
 }
 
@@ -1196,7 +1278,11 @@ menu_snapshot() {
   echo "  1) use the detected file"
   printf '  2) enter a path (snapshot.json, MT5 folder, or C:\\Program Files\\MetaTrader 5)\n'
   echo "  3) clear (let the dashboard search by itself)"
-  m=$(ask_default "1" "choose 1, 2 or 3")
+  m=$(ask_default "1" "choose 1, 2 or 3 (0 = back)")
+  if wants_back "$m"; then
+    echo "back to the main menu."
+    return
+  fi
   case "$m" in
     1)
       if [ -z "$det" ]; then
@@ -1206,8 +1292,12 @@ menu_snapshot() {
       new="$det"
       ;;
     2)
-      printf '%s' 'path: ' >&2
+      printf '%s' 'path (0 = back): ' >&2
       IFS= read -r typed || typed=""
+      if wants_back "$typed"; then
+        echo "back to the main menu."
+        return
+      fi
       if [ -z "$typed" ]; then
         echo "cancelled."
         return
@@ -1219,7 +1309,11 @@ menu_snapshot() {
       fi
       if [ ! -f "$new" ]; then
         echo "not found yet: $new"
-        a=$(ask_default "y" "save this path anyway? (y/n)")
+        a=$(ask_default "y" "save this path anyway? (y/n, 0 = back)")
+        if wants_back "$a"; then
+          echo "back to the main menu."
+          return
+        fi
         if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
           echo "cancelled."
           return
@@ -1243,10 +1337,17 @@ menu_snapshot() {
     echo "saved: snapshot = auto-detect"
   fi
   if [ -n "$(dashboard_pid)" ]; then
-    a=$(ask_default "y" "restart the dashboard now? (y/n)")
+    a=$(ask_default "y" "restart the dashboard now? (y/n, 0 = back)")
+    if wants_back "$a"; then
+      echo "back to the main menu."
+      return
+    fi
     if [ "$a" = "y" ] || [ "$a" = "Y" ]; then
+      if ! port=$(choose_port); then
+        echo "the dashboard was not restarted (menu 2 to start it later)."
+        return
+      fi
       stop_dashboard
-      port=$(choose_port)
       start_dashboard "$bind" "$password" "$port"
     fi
   fi
@@ -1260,11 +1361,18 @@ menu_configure() {
   echo "current bind: $(current_bind || echo 127.0.0.1)"
   echo "  1) local only"
   echo "  2) internet (password required)"
-  m=$(ask_default "1" "choose 1 or 2")
+  m=$(ask_default "1" "choose 1 or 2 (0 = back)")
+  if wants_back "$m"; then
+    echo "back to the main menu."
+    return
+  fi
   running=""
   [ -n "$(dashboard_pid)" ] && running=1
   if [ "$m" = "2" ]; then
-    password=$(prompt_password)
+    if ! password=$(prompt_password); then
+      echo "back to the main menu."
+      return
+    fi
     write_env_file "0.0.0.0" "$password"
     echo "saved. access: user 'mapsim' / password '$password'"
   else
@@ -1272,10 +1380,17 @@ menu_configure() {
     echo "saved: local only."
   fi
   if [ -n "$running" ]; then
-    a=$(ask_default "y" "restart the dashboard now? (y/n)")
+    a=$(ask_default "y" "restart the dashboard now? (y/n, 0 = back)")
+    if wants_back "$a"; then
+      echo "back to the main menu."
+      return
+    fi
     if [ "$a" = "y" ] || [ "$a" = "Y" ]; then
+      if ! port=$(choose_port); then
+        echo "the dashboard was not restarted (menu 2 to start it later)."
+        return
+      fi
       stop_dashboard
-      port=$(choose_port)
       start_dashboard "$(current_bind)" "$(current_password)" "$port"
     fi
   fi
@@ -1295,7 +1410,11 @@ menu_service_remove() {
     echo "no service is installed."
     return
   fi
-  a=$(ask_default "y" "remove the auto-start service? (y/n)")
+  a=$(ask_default "y" "remove the auto-start service? (y/n, 0 = back)")
+  if wants_back "$a"; then
+    echo "back to the main menu."
+    return
+  fi
   if [ "$a" = "y" ] || [ "$a" = "Y" ]; then
     service_remove
     echo "service removed (the app itself stays installed)."
@@ -1305,7 +1424,11 @@ menu_service_remove() {
 menu_uninstall() {
   echo "this removes the dashboard app, config, service and commands."
   echo "nothing is changed in MetaTrader 5 or in the Expert Advisor."
-  a=$(ask_default "n" "are you sure? type y to confirm")
+  a=$(ask_default "n" "are you sure? type y to confirm (0 = back)")
+  if wants_back "$a"; then
+    echo "back to the main menu."
+    return
+  fi
   if [ "$a" = "y" ] || [ "$a" = "Y" ]; then
     uninstall_everything
   else
@@ -1395,6 +1518,7 @@ menu_main() {
     ui_item "12" "Snapshot file / data source"
     ui_item "13" "Exit"
     ui_bottom
+    printf '%s\n' "${CYAN}tip: type 0 inside any option to return to this menu.${NC}"
     printf '\n%s' "${CYAN}Enter Number Of List:${NC} "
     if ! IFS= read -r c; then
       echo ""
