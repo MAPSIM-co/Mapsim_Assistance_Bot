@@ -268,9 +268,11 @@ function Show-Menu {
     Write-Host '  6) Remove auto-start service'
     Write-Host '  7) Access mode / password'
     Write-Host '  8) Uninstall everything'
-    Write-Host '  9) Exit'
+    Write-Host '  9) Expert Advisor: install / update'
+    Write-Host ' 10) Expert Advisor: version check'
+    Write-Host ' 11) Exit'
     Write-Host ''
-    $c = Read-Host 'choose 1-9'
+    $c = Read-Host 'choose 1-11'
     switch ($c) {
       '1' { Show-Status }
       '2' {
@@ -330,9 +332,154 @@ function Show-Menu {
         $a = Read-Default 'are you sure? type y to confirm' 'n'
         if ($a -eq 'y') { Uninstall-Everything } else { Write-Host 'cancelled.' }
       }
-      '9' { Write-Host 'bye.'; return }
-      default { Write-Host 'please choose 1-9.' }
+      '9' {
+        $latest = Get-EaLatestVersion
+        if (-not $latest) { Write-Host 'error: could not reach GitHub to find the latest Expert version.'; continue }
+        $cur = Get-EaInstalledVersion
+        if ($cur -and $cur -eq $latest) {
+          $a = Read-Default "version $cur is already installed - reinstall? (y/n)" 'y'
+          if ($a -ne 'y') { continue }
+        }
+        Install-Ea $latest
+      }
+      '10' { Show-EaStatus }
+      '11' { Write-Host 'bye.'; return }
+      default { Write-Host 'please choose 1-11.' }
     }
+  }
+}
+
+# ---------------------------------------------------------------- expert advisor
+
+$EaState = Join-Path $ConfigDir 'ea-state.env'
+
+function Get-EaLatestVersion {
+  try {
+    $tags = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/tags?per_page=100" -TimeoutSec 15
+    $v = $tags | Where-Object { $_.name -match '^v\d' } | ForEach-Object { $_.name }
+    if (-not $v) { return '' }
+    return ($v | Sort-Object { [version]($_.TrimStart('v')) } | Select-Object -Last 1)
+  } catch {
+    return ''
+  }
+}
+
+function Get-EaInstalledVersion {
+  if (Test-Path $EaState) {
+    $line = Get-Content $EaState | Where-Object { $_ -match '^EA_VERSION=' } | Select-Object -Last 1
+    if ($line) { return $line -replace '^EA_VERSION=', '' }
+  }
+  return ''
+}
+
+function Find-Mql5Folders {
+  $found = @()
+  $termRoot = Join-Path $env:APPDATA 'MetaQuotes\Terminal'
+  if (Test-Path $termRoot) {
+    $found += Get-ChildItem $termRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+      $m = Join-Path $_.FullName 'MQL5'
+      if (Test-Path $m) { $m }
+    }
+  }
+  foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+    if ($pf -and (Test-Path $pf)) {
+      $found += Get-ChildItem $pf -Directory -Filter 'MetaTrader*' -ErrorAction SilentlyContinue | ForEach-Object {
+        $m = Join-Path $_.FullName 'MQL5'
+        if (Test-Path $m) { $m }
+      }
+    }
+  }
+  return $found
+}
+
+function Install-Ea([string]$Version) {
+  if (-not $Version) { $Version = Get-EaLatestVersion }
+  if (-not $Version) {
+    Write-Host 'error: could not determine the latest Expert version - check your internet connection.' -ForegroundColor Red
+    return
+  }
+  $mql5List = @(Find-Mql5Folders)
+  if ($mql5List.Count -eq 0) {
+    Write-Host 'error: no MetaTrader 5 data folder (MQL5) was found.' -ForegroundColor Red
+    Write-Host 'hint: install MT5, run it once (File -> Open Data Folder), then retry.' -ForegroundColor Red
+    return
+  }
+  Write-Host "latest Expert version: $Version"
+  $current = Get-EaInstalledVersion
+  if ($current) { Write-Host "installed version    : $current" }
+  Write-Host 'MQL5 folders found:'
+  for ($i = 0; $i -lt $mql5List.Count; $i++) { Write-Host "  $($i + 1)) $($mql5List[$i])" }
+  if ($mql5List.Count -gt 1) { $sel = Read-Default "choose 1-$($mql5List.Count) (or 'a' for all)" '1' }
+  else { $sel = '1' }
+
+  Write-Host "downloading Expert $Version ..."
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+  New-Item -ItemType Directory -Force $tmp | Out-Null
+  try {
+    $zip = Join-Path $tmp 'ea.zip'
+    Invoke-WebRequest -Uri "https://github.com/$Repo/archive/refs/tags/$Version.zip" -OutFile $zip -TimeoutSec 600 -UseBasicParsing
+    Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'src') -Force
+    $root = Get-ChildItem (Join-Path $tmp 'src') -Directory | Select-Object -First 1
+    $pkg = Join-Path $root.FullName 'Expert\Meta_trader_5'
+    if (-not (Test-Path $pkg)) { throw "the $Version package has no Expert folder." }
+    $ex5 = Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Where-Object { $_.Name -match 'win' } | Select-Object -First 1
+    if (-not $ex5) {
+      $ex5 = Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Select-Object -First 1
+      if ($ex5) { Write-Host "note: no Windows build found - using $($ex5.Name)" }
+    }
+    if (-not $ex5) { throw "no .ex5 Expert file in the $Version package." }
+    $includeZip = Get-ChildItem (Join-Path $pkg 'Include') -Filter '*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $dll = Join-Path $pkg 'Libraries\sqlite3.dll'
+    $sounds = Join-Path $pkg 'Sounds\Mapsim_Assistance_Bot\Sounds'
+
+    $installedTo = @()
+    for ($i = 0; $i -lt $mql5List.Count; $i++) {
+      if ($sel -ne 'a' -and $sel -ne 'A' -and $sel -ne [string]($i + 1)) { continue }
+      $mql5 = $mql5List[$i]
+      New-Item -ItemType Directory -Force "$mql5\Experts", "$mql5\Libraries", "$mql5\Include", "$mql5\Files\Mapsim_Assistance_Bot\Sounds" | Out-Null
+      Copy-Item -Force $ex5.FullName "$mql5\Experts\"
+      if (Test-Path $dll) { Copy-Item -Force $dll "$mql5\Libraries\" }
+      if ($includeZip) { Expand-Archive -Path $includeZip.FullName -DestinationPath "$mql5\Include" -Force }
+      if (Test-Path $sounds) { Copy-Item -Force "$sounds\*.wav" "$mql5\Files\Mapsim_Assistance_Bot\Sounds\" }
+      $installedTo += $mql5
+    }
+  } finally {
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+  }
+  New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+  @(
+    "EA_VERSION=$Version",
+    "EA_FILE=$($ex5.Name)",
+    "EA_MQL5=$($installedTo -join ';')",
+    "EA_UPDATED=$(Get-Date -Format yyyy-MM-dd)"
+  ) | Set-Content $EaState -Encoding ASCII
+  Write-Host "installed: $($ex5.Name) ($Version) -> $($installedTo -join '; ')"
+  Write-Host 'next steps in MetaTrader 5:'
+  Write-Host '  1) restart MetaTrader 5'
+  Write-Host '  2) allow DLL imports in the EA options'
+  Write-Host '  3) attach the Mapsim Assistance Bot Expert to your chart'
+  Write-Host '  4) enter your license (from the Mapsim Bot in Telegram)'
+}
+
+function Show-EaStatus {
+  $cur = Get-EaInstalledVersion
+  $latest = Get-EaLatestVersion
+  if (-not $cur) { Write-Host "Expert Advisor: not installed through Mapsim_BOT" }
+  else {
+    Write-Host "installed version : $cur"
+    if (Test-Path $EaState) {
+      $upd = (Get-Content $EaState | Where-Object { $_ -match '^EA_UPDATED=' } | Select-Object -Last 1) -replace '^EA_UPDATED=', ''
+      if ($upd) { Write-Host "last updated      : $upd" }
+    }
+  }
+  if ($latest) {
+    Write-Host "latest version    : $latest"
+    if ($cur -and $cur -ne $latest) {
+      $a = Read-Default 'a newer version is available - install it now? (y/n)' 'y'
+      if ($a -eq 'y') { Install-Ea $latest }
+    }
+  } else {
+    Write-Host 'latest version    : (could not check - no internet?)'
   }
 }
 

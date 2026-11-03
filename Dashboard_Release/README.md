@@ -64,18 +64,42 @@ setup):
 === Mapsim BOT control center ===
 dashboard: stopped   app: installed
 
-  1) Status                     - installed? running? ports? service?
-  2) Start dashboard            - asks: local only or internet, checks ports,
-                                  asks for a password in internet mode
-  3) Stop dashboard             - stops only this dashboard, frees the port
-  4) Install / update dashboard - downloads the newest release, checksum-checked
-  5) Enable auto-start service  - starts at boot/login (systemd / LaunchAgent /
-                                  scheduled task)
+  1) Status                        - installed? running? ports? service?
+  2) Start dashboard               - asks: local only or internet, checks ports,
+                                     asks for a password in internet mode
+  3) Stop dashboard                - stops only this dashboard, frees the port
+  4) Install / update dashboard    - downloads the newest release, checksum-checked
+  5) Enable auto-start service     - starts at boot/login (systemd / LaunchAgent /
+                                     scheduled task)
   6) Remove auto-start service
-  7) Access mode / password     - switch local <-> internet, set a new password
-  8) Uninstall everything       - full removal, asks for confirmation first
-  9) Exit
+  7) Access mode / password        - switch local <-> internet, set a new password
+  8) Uninstall everything          - full removal, asks for confirmation first
+  9) Expert Advisor: install/update- downloads the newest EA from the newest v*
+                                     release tag, copies it (OS-matched .ex5,
+                                     Include, Libraries, Sounds) into the detected
+                                     MetaTrader 5 MQL5 folder(s)
+ 10) Expert Advisor: version check - shows installed vs latest, offers the update
+ 11) Exit
 ```
+
+### Expert Advisor management
+
+Menu 9 detects the MetaTrader 5 data folder(s) automatically
+(`~/.../net.metaquotes.wine.metatrader5/drive_c/**/MQL5` on macOS,
+`~/.wine/drive_c/**/MQL5` on Linux, `%APPDATA%\MetaQuotes\Terminal\<id>\MQL5` on
+Windows), downloads the newest `v*` release of this repository, and copies:
+
+- the Expert `.ex5` that matches your operating system → `MQL5/Experts/`
+- `Mapsim_Assistance_Bot_lnclude.zip` (extracted) → `MQL5/Include/`
+- `sqlite3.dll` → `MQL5/Libraries/`
+- alert sounds → `MQL5/Files/Mapsim_Assistance_Bot/Sounds/`
+
+If several MT5 instances are found you can pick one or apply to all. After the
+copy it reminds you to restart MT5, allow DLL imports and enter your license.
+Menu 10 compares the installed version (recorded in
+`~/.config/mapsim-dashboard/ea-state.env` / `%APPDATA%\MapsimDashboard\ea-state.env`)
+with the newest `v*` tag and offers to update. Uninstalling the dashboard never
+touches the Expert files inside MetaTrader 5.
 
 The installer flags still work when the installer file is run directly
 (download it first), and map to the same actions:

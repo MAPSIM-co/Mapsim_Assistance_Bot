@@ -213,6 +213,10 @@ The same actions are also available as installer flags (`--public`,
 - **Start automatically after every reboot** — `Mapsim_BOT` menu 5 (or
   `--service` / `-Service`): systemd on Linux, LaunchAgent on macOS, a
   scheduled task on Windows.
+- **Install or update the Expert Advisor** — `Mapsim_BOT` menu 9 finds your
+  MetaTrader 5 folder, downloads the newest EA release and copies the expert,
+  include files, libraries and sounds into place; menu 10 checks for a newer
+  version and updates with one key.
 - **Remove everything** — `Mapsim_BOT` menu 8 (or `install.sh --uninstall` /
   `install.ps1 -Uninstall`) deletes the app, the auto-start service, the
   password file and all logs. Nothing touches MetaTrader 5.

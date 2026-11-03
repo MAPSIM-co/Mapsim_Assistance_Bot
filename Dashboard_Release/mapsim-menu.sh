@@ -487,6 +487,210 @@ ask_default() {
   [ -n "$a" ] && echo "$a" || echo "$d"
 }
 
+# ---------------------------------------------------------------- expert advisor
+
+EA_STATE="$CONFIG_DIR/ea-state.env"
+
+ea_latest_version() {
+  tags=$(curl -fsSL "https://api.github.com/repos/$REPO/tags?per_page=100" 2>/dev/null \
+    | grep -o '"name": *"v[0-9][^"]*"' | sed 's/.*"name": *"\([^"]*\)"/\1/') || true
+  if [ -z "$tags" ]; then
+    echo ""
+    return
+  fi
+  echo "$tags" | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | sed 's/^/v/'
+}
+
+ea_installed_version() {
+  [ -f "$EA_STATE" ] && grep -E '^EA_VERSION=' "$EA_STATE" | tail -n 1 | cut -d= -f2- || true
+}
+
+ea_installed_path() {
+  [ -f "$EA_STATE" ] && grep -E '^EA_MQL5=' "$EA_STATE" | tail -n 1 | cut -d= -f2- || true
+}
+
+# Print detected MT5 MQL5 folders, one per line.
+ea_find_mql5() {
+  case "$OS" in
+    Darwin)
+      base="$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c"
+      ;;
+    Linux)
+      base="$HOME/.wine/drive_c"
+      ;;
+  esac
+  if [ -n "${base:-}" ] && [ -d "$base" ]; then
+    find "$base" -maxdepth 6 -type d -name MQL5 2>/dev/null
+  fi
+}
+
+# Pick the right .ex5 for this OS from the extracted package root.
+ea_pick_expert() {
+  src="$1"
+  case "$OS" in
+    Darwin) pref="mcos" ;;
+    *) pref="win" ;;
+  esac
+  all=$(find "$src" -name '*.ex5' 2>/dev/null | sort)
+  if [ -z "$all" ]; then
+    echo ""
+    return
+  fi
+  picked=$(printf '%s\n' "$all" | grep -i "$pref" | head -n 1 || true)
+  if [ -z "$picked" ]; then
+    picked=$(printf '%s\n' "$all" | head -n 1)
+    echo "note: no '$pref' build found - using $(basename "$picked")" >&2
+  fi
+  echo "$picked"
+}
+
+ea_install() {
+  if ! command -v unzip >/dev/null 2>&1; then
+    echo "error: 'unzip' is required but was not found." >&2
+    return 1
+  fi
+  version="${1:-}"
+  if [ -z "$version" ]; then
+    version=$(ea_latest_version)
+  fi
+  if [ -z "$version" ]; then
+    echo "error: could not determine the latest Expert version - check your internet connection." >&2
+    return 1
+  fi
+
+  current=$(ea_installed_version)
+  mql5_list=$(ea_find_mql5)
+  if [ -z "$mql5_list" ]; then
+    echo "error: no MetaTrader 5 data folder (MQL5) was found." >&2
+    case "$OS" in
+      Darwin) echo "hint: install MT5 for macOS, run it once, then retry." >&2 ;;
+      Linux) echo "hint: install MT5 under Wine (default: ~/.wine/drive_c/Program Files/MetaTrader 5), run it once, then retry." >&2 ;;
+    esac
+    return 1
+  fi
+
+  echo "latest Expert version: $version"
+  [ -n "$current" ] && echo "installed version    : $current"
+  echo "MQL5 folders found:"
+  n=1
+  old_ifs=$IFS
+  IFS='
+'
+  for d in $mql5_list; do
+    echo "  $n) $d"
+    n=$((n + 1))
+  done
+  IFS=$old_ifs
+  total=$((n - 1))
+  if [ "$total" -gt 1 ]; then
+    sel=$(ask_default "1" "choose 1-$total (or 'a' for all)")
+  else
+    sel="1"
+  fi
+
+  echo "downloading Expert $version ..."
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' INT TERM
+  if ! curl -fsSL --retry 3 --retry-delay 2 -o "$tmp/ea.zip" "https://github.com/$REPO/archive/refs/tags/$version.zip"; then
+    rm -rf "$tmp"
+    echo "error: download failed." >&2
+    return 1
+  fi
+  unzip -q "$tmp/ea.zip" -d "$tmp/src"
+  root=$(find "$tmp/src" -maxdepth 1 -mindepth 1 -type d | head -n 1)
+  pkg="$root/Expert/Meta_trader_5"
+  if [ ! -d "$pkg" ]; then
+    rm -rf "$tmp"
+    echo "error: the $version package has no Expert folder." >&2
+    return 1
+  fi
+  ex5=$(ea_pick_expert "$pkg")
+  if [ -z "$ex5" ]; then
+    rm -rf "$tmp"
+    echo "error: no .ex5 Expert file in the $version package." >&2
+    return 1
+  fi
+  include_zip=$(find "$pkg" -path '*/Include/*' -name '*.zip' | head -n 1 || true)
+
+  installed_to=""
+  n=1
+  old_ifs=$IFS
+  IFS='
+'
+  for d in $mql5_list; do
+    if [ "$sel" != "a" ] && [ "$sel" != "A" ] && [ "$sel" != "$n" ]; then
+      n=$((n + 1))
+      continue
+    fi
+    n=$((n + 1))
+    mkdir -p "$d/Experts" "$d/Libraries" "$d/Include" "$d/Files/Mapsim_Assistance_Bot/Sounds"
+    cp -f "$ex5" "$d/Experts/"
+    [ -f "$pkg/Libraries/sqlite3.dll" ] && cp -f "$pkg/Libraries/sqlite3.dll" "$d/Libraries/"
+    if [ -n "$include_zip" ]; then
+      unzip -o -q "$include_zip" -d "$d/Include/"
+    fi
+    if [ -d "$pkg/Sounds/Mapsim_Assistance_Bot/Sounds" ]; then
+      cp -f "$pkg/Sounds/Mapsim_Assistance_Bot/Sounds/"*.wav "$d/Files/Mapsim_Assistance_Bot/Sounds/" 2>/dev/null || true
+    fi
+    installed_to="$installed_to $d"
+  done
+  IFS=$old_ifs
+  rm -rf "$tmp"
+  trap - INT TERM
+
+  mkdir -p "$CONFIG_DIR"
+  {
+    echo "EA_VERSION=$version"
+    echo "EA_FILE=$(basename "$ex5")"
+    echo "EA_MQL5=$installed_to"
+    echo "EA_UPDATED=$(date +%F)"
+  } > "$EA_STATE"
+  echo "installed: $(basename "$ex5") ($version) ->$installed_to"
+  echo "next steps in MetaTrader 5:"
+  echo "  1) restart MetaTrader 5"
+  echo "  2) allow DLL imports in the EA options"
+  echo "  3) attach the Mapsim Assistance Bot Expert to your chart"
+  echo "  4) enter your license (from the Mapsim Bot in Telegram)"
+}
+
+menu_ea_install() {
+  latest=$(ea_latest_version)
+  if [ -z "$latest" ]; then
+    echo "error: could not reach GitHub to find the latest Expert version." >&2
+    return
+  fi
+  cur=$(ea_installed_version)
+  if [ -n "$cur" ] && [ "$cur" = "$latest" ]; then
+    a=$(ask_default "y" "version $cur is already installed - reinstall? (y/n)")
+    [ "$a" != "y" ] && [ "$a" != "Y" ] && return
+  fi
+  ea_install "$latest"
+}
+
+menu_ea_status() {
+  cur=$(ea_installed_version)
+  latest=$(ea_latest_version)
+  if [ -z "$cur" ]; then
+    echo "Expert Advisor: not installed through $MENU_CMD"
+  else
+    echo "installed version : $cur"
+    p=$(ea_installed_path)
+    [ -n "$p" ] && echo "installed into    :$p"
+    [ -f "$EA_STATE" ] && grep -E '^EA_UPDATED=' "$EA_STATE" | sed 's/^EA_/last /'
+  fi
+  if [ -n "$latest" ]; then
+    echo "latest version    : $latest"
+    if [ -n "$cur" ] && [ "$cur" != "$latest" ]; then
+      a=$(ask_default "y" "a newer version is available - install it now? (y/n)")
+      if [ "$a" = "y" ] || [ "$a" = "Y" ]; then
+        ea_install "$latest"
+      fi
+    fi
+  else
+    echo "latest version    : (could not check - no internet?)"
+  fi
+}
+
 # ---------------------------------------------------------------- uninstall
 
 uninstall_everything() {
@@ -661,9 +865,11 @@ menu_main() {
     echo "  6) Remove auto-start service"
     echo "  7) Access mode / password"
     echo "  8) Uninstall everything"
-    echo "  9) Exit"
+    echo "  9) Expert Advisor: install / update"
+    echo " 10) Expert Advisor: version check"
+    echo " 11) Exit"
     echo ""
-    printf 'choose 1-9: '
+    printf 'choose 1-11: '
     if ! IFS= read -r c; then
       echo ""
       echo "bye."
@@ -678,8 +884,10 @@ menu_main() {
       6) menu_service_remove ;;
       7) menu_configure ;;
       8) menu_uninstall ;;
-      9) echo "bye."; exit 0 ;;
-      *) echo "please choose 1-9." ;;
+      9) menu_ea_install ;;
+      10) menu_ea_status ;;
+      11) echo "bye."; exit 0 ;;
+      *) echo "please choose 1-11." ;;
     esac
   done
 }
