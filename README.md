@@ -153,6 +153,71 @@ Run MetaTrader 5: Open your trading terminal and attach the Mapsim Assistance Bo
 **Interact: Use the hardware device to execute trading actions like Buy, Sell,Partial Position,or Close with precision.**
 
 
+## Mapsim Live Dashboard (desktop app)
+
+A read-only desktop dashboard for your MetaTrader 5 account. It reads the
+snapshot that the Expert Advisor writes and shows positions, recovery state,
+market structure, news and the event log in your browser.
+
+> The dashboard **never sends orders** and **never writes** to MetaTrader 5 or
+> to the Expert Advisor. It only reads data.
+
+No Python installation is required. Download one file, unpack it and run it.
+
+### Download
+
+Open the [**Releases**](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/releases/latest)
+page and download the build for your system:
+
+| System | File |
+|---|---|
+| Windows 10/11 (64-bit) | `MapsimDashboard-windows-x64.zip` |
+| macOS — Apple Silicon (M1/M2/M3/M4) | `MapsimDashboard-macos-arm64.zip` |
+| macOS — Intel | `MapsimDashboard-macos-x64.zip` |
+| Linux (64-bit) | `MapsimDashboard-linux-x64.tar.gz` |
+
+Each release also publishes a `.sha256` file next to each archive so you can
+verify the download.
+
+### Install on Windows
+
+1. Install the Expert Advisor first (see **Installation and Setup** above) and
+   attach it to a chart in MetaTrader 5.
+2. Download `MapsimDashboard-windows-x64.zip` and unzip it anywhere you like
+   (for example `C:\MapsimDashboard`).
+3. Run `MapsimDashboard.exe`.
+4. Windows SmartScreen may warn about an unknown publisher the first time.
+   Choose **More info → Run anyway**.
+5. Your browser opens the dashboard at `http://127.0.0.1:8765/`.
+
+The dashboard detects the default MetaTrader 5 data folder automatically
+(`%APPDATA%\MetaQuotes\Terminal\<instance>\MQL5\Files\MapsimLive\snapshot.json`),
+including portable installs under `%ProgramFiles%\MetaTrader 5`.
+
+### Install on macOS and Linux
+
+- **macOS** — unzip and open `MapsimDashboard.app`. If macOS blocks it,
+  right-click the app and choose **Open**.
+- **Linux** — unpack the archive, run `chmod +x MapsimDashboard` once, then
+  start it.
+
+### Using the dashboard
+
+- Start the dashboard after MetaTrader 5 and the EA are running. If several MT5
+  terminals or snapshots are present, the newest snapshot is used; with several
+  terminals, start MT5 first and restart the app if the wrong one was picked.
+- To use a specific file instead, start the app from a terminal with
+  `--file /path/to/snapshot.json` (or set `MAPSIM_SNAPSHOT`).
+- If port `8765` is busy, start with `--port 8799` (or any free port).
+- To watch a VPS account, open the **Link** tab in the dashboard and connect
+  over SFTP. The password is kept in memory only.
+- Logs are written to `dashboard.log` in the per-user application folder
+  (`%APPDATA%\MapsimDashboard` on Windows).
+
+Full details, build instructions and troubleshooting: [`Dashboard_Release/README.md`](Dashboard_Release/README.md).
+
+---
+
 ## Requirements
 
 - Operating System: Windows 32/64 Bit or later And macOS
