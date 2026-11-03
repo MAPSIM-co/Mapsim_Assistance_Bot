@@ -53,8 +53,20 @@ before running a downloaded build.
 
 The app only reads data. It accepts a snapshot from any of these sources:
 
-1. **Local MetaTrader 5 (macOS)** — the default EA export location is detected
-   automatically.
+1. **Local MetaTrader 5 — detected automatically.** The dashboard scans the
+   default MT5 data folders for `MapsimLive/snapshot.json`:
+   - Windows: `%APPDATA%\MetaQuotes\Terminal\<instance>\MQL5\Files\MapsimLive\snapshot.json`
+     for every installed terminal, plus portable installs under
+     `%ProgramFiles%\MetaTrader 5\MQL5\Files`
+   - macOS: `~/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5/MQL5/Files/MapsimLive/snapshot.json`
+   - Linux (Wine): `~/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Files/MapsimLive/snapshot.json`
+
+   When several terminals or snapshots exist, the newest file wins. The path is
+   resolved once at startup: with a single MT5 data folder the dashboard picks
+   up the snapshot as soon as the EA writes it, even if MT5 was started after
+   the app. With several terminals, start MT5 first and restart the app if the
+   wrong snapshot was chosen. If MT5 uses a custom data folder, use one of the
+   options below instead.
 2. **Snapshot file** — `--file /path/to/snapshot.json` or the
    `MAPSIM_SNAPSHOT` environment variable.
 3. **User data folder** — if started with no arguments and a `snapshot.json`
