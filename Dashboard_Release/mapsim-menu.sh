@@ -221,9 +221,62 @@ EOF
   chmod +x "$WRAPPER"
 }
 
+# Commands live in ~/.local/bin (always writable, no sudo). The PATH block
+# below keeps that directory on PATH for future terminals; without it a
+# non-root user gets "Mapsim_BOT: command not found".
+LOCAL_BIN="$HOME/.local/bin"
+PATH_MARKER="# Mapsim BOT: put ~/.local/bin on PATH"
+
+path_has_local_bin() {
+  printf '%s' ":$PATH:" | grep -q ":$LOCAL_BIN:"
+}
+
+ensure_path() {
+  touched=0
+  for f in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zprofile" "$HOME/.zshrc"; do
+    [ -f "$f" ] || continue
+    touched=1
+    if grep -qF "$PATH_MARKER" "$f" 2>/dev/null; then
+      continue
+    fi
+    {
+      echo ""
+      echo "$PATH_MARKER"
+      echo 'case ":$PATH:" in'
+      echo '  *":$HOME/.local/bin:"*) ;;'
+      echo '  *) PATH="$HOME/.local/bin:$PATH"; export PATH ;;'
+      echo 'esac'
+    } >> "$f"
+  done
+  if [ "$touched" -eq 0 ]; then
+    {
+      echo "$PATH_MARKER"
+      echo 'case ":$PATH:" in'
+      echo '  *":$HOME/.local/bin:"*) ;;'
+      echo '  *) PATH="$HOME/.local/bin:$PATH"; export PATH ;;'
+      echo 'esac'
+    } > "$HOME/.profile"
+  fi
+}
+
+remove_path_block() {
+  for f in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zprofile" "$HOME/.zshrc"; do
+    [ -f "$f" ] || continue
+    grep -qF "$PATH_MARKER" "$f" 2>/dev/null || continue
+    awk -v m="$PATH_MARKER" '
+      $0 == m { skip = 1; next }
+      skip == 1 && $0 ~ /^[ \t]*esac[ \t]*$/ { skip = 0; next }
+      skip == 1 { next }
+      { print }
+    ' "$f" > "$f.mapsim-tmp" && mv "$f.mapsim-tmp" "$f"
+  done
+}
+
 install_command_link() {
-  # Make commands available even when ~/.local/bin is not on PATH (e.g. root
-  # on many VPS images). Only link into directories we can write without sudo.
+  # mapsim-dashboard already lives in ~/.local/bin (write_wrapper); only the
+  # Mapsim_BOT command has to be linked there.
+  mkdir -p "$LOCAL_BIN"
+  ln -sf "$MENU_DEST" "$LOCAL_BIN/$MENU_CMD"
   LINKS=""
   for dir in /usr/local/bin /usr/bin; do
     if [ -d "$dir" ] && [ -w "$dir" ]; then
@@ -233,17 +286,24 @@ install_command_link() {
       break
     fi
   done
-  if [ -z "$LINKS" ] && ! printf '%s' ":$PATH:" | grep -q ":$HOME/.local/bin:"; then
-    echo "note: add $HOME/.local/bin to your PATH to use the 'mapsim-dashboard'"
-    echo "      and '$MENU_CMD' commands:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  if [ -z "$LINKS" ]; then
+    ensure_path
+    if path_has_local_bin; then
+      msg_info "commands ready: $MENU_CMD and mapsim-dashboard"
+    else
+      echo "commands installed in $LOCAL_BIN ($MENU_CMD, mapsim-dashboard)"
+      echo "this terminal:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+      echo "new terminals already find them."
+    fi
   fi
 }
 
 remove_command_link() {
-  for dir in /usr/local/bin /usr/bin; do
+  for dir in /usr/local/bin /usr/bin "$LOCAL_BIN"; do
     [ -L "$dir/mapsim-dashboard" ] && rm -f "$dir/mapsim-dashboard"
     [ -L "$dir/$MENU_CMD" ] && rm -f "$dir/$MENU_CMD"
   done
+  remove_path_block
 }
 
 install_self() {
@@ -1110,7 +1170,13 @@ bootstrap() {
   fi
 
   echo ""
-  echo "done. From now on manage everything with:  $MENU_CMD"
+  if path_has_local_bin; then
+    echo "done. From now on manage everything with:  $MENU_CMD"
+  else
+    echo "done. Manage everything with:  $LOCAL_BIN/$MENU_CMD"
+    echo "this terminal needs:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo "new terminals find $MENU_CMD automatically."
+  fi
 }
 
 # ---------------------------------------------------------------- entrypoint

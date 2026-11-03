@@ -54,6 +54,18 @@ Mapsim_BOT          # macOS / Linux
 Mapsim_BOT.cmd      # Windows (on the Desktop shortcut or in %LOCALAPPDATA%\MapsimDashboard)
 ```
 
+On macOS and Linux the `Mapsim_BOT` command is always placed in
+`~/.local/bin`, and the installer adds that folder to `PATH` in your shell
+startup files (`~/.profile`, `~/.bashrc`, `~/.zprofile`, `~/.zshrc`, whichever
+exist). It never needs `sudo` and never overwrites your shell configuration —
+the block is added once and removed again on uninstall. If the terminal that
+ran the installer still says `Mapsim_BOT: command not found`, either open a new
+terminal or run:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 ## Mapsim BOT control center
 
 `Mapsim_BOT` opens an interactive menu that asks only when a decision is
@@ -232,18 +244,24 @@ sh install.sh --uninstall      # macOS/Linux
 .\install.ps1 -Uninstall       # Windows
 ```
 
-This removes the app, the auto-start service/task, the `mapsim-dashboard`
-command, the desktop shortcut / app-menu entry, the saved access password and
+This removes the app, the auto-start service/task, the `mapsim-dashboard` and
+`Mapsim_BOT` commands, the `PATH` line the installer added to your shell startup
+files, the desktop shortcut / app-menu entry, the saved access password and
 the log folder. Nothing is left behind and MetaTrader 5 / the Expert Advisor
 are never touched. Manual equivalent:
 
 - **macOS** — quit the app, then delete `~/Applications/MapsimDashboard.app`
-  and `~/Library/Application Support/MapsimDashboard`; if a service was
-  installed also delete `~/Library/LaunchAgents/com.mapsim.dashboard.plist`
+  and `~/Library/Application Support/MapsimDashboard`; remove
+  `~/.local/bin/mapsim-dashboard` and `~/.local/bin/Mapsim_BOT`, and the
+  `# Mapsim BOT: put ~/.local/bin on PATH` block from your shell startup file;
+  if a service was installed also delete `~/Library/LaunchAgents/com.mapsim.dashboard.plist`
   and run `launchctl bootout gui/$UID ~/Library/LaunchAgents/com.mapsim.dashboard.plist`.
 - **Linux** — `pkill -f MapsimDashboard`, then delete `~/.local/share/MapsimDashboard`,
-  `~/.local/bin/mapsim-dashboard`, `~/.local/share/applications/mapsim-dashboard.desktop`
-  and `~/.config/mapsim-dashboard`; if a root service was installed also run
+  `~/.local/bin/mapsim-dashboard`, `~/.local/bin/Mapsim_BOT`,
+  `~/.local/share/applications/mapsim-dashboard.desktop` and
+  `~/.config/mapsim-dashboard`, and remove the
+  `# Mapsim BOT: put ~/.local/bin on PATH` block from your shell startup file;
+  if a root service was installed also run
   `sudo systemctl disable --now mapsim-dashboard.service` and delete
   `/etc/systemd/system/mapsim-dashboard.service`.
 - **Windows** — end `MapsimDashboard.exe` in Task Manager, then delete
