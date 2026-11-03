@@ -106,11 +106,15 @@ you can copy it), whether the live snapshot file is being read
                                      asks for a password in internet mode; if the
                                      dashboard is already running it offers to
                                      stop it and restart with the new settings
-  3) Stop dashboard                - stops only this dashboard, frees the port
+  3) Stop dashboard                - stops every dashboard process, frees the
+                                     port; if the auto-start service is running it
+                                     is stopped too (otherwise it would restart it)
   4) Install / update dashboard    - downloads the newest release, checksum-checked
-  5) Enable auto-start service     - starts at boot/login (systemd / LaunchAgent /
+  5) Service management            - submenu: status, install + enable, start,
+                                     stop, restart, enable at boot/login, disable
+                                     at boot/login (systemd / LaunchAgent /
                                      scheduled task)
-  6) Remove auto-start service
+  6) Remove auto-start service     - uninstalls the service/task, keeps the app
   7) Access mode / password        - switch local <-> internet, set a new password
   8) Uninstall everything          - full removal, asks for confirmation first
   9) Expert Advisor: install/update- downloads the newest EA from the newest v*
@@ -119,7 +123,7 @@ you can copy it), whether the live snapshot file is being read
                                      MetaTrader 5 MQL5 folder(s)
  10) Expert Advisor: version check - shows installed vs latest, offers the update
  11) Disk space / server storage   - all filesystems, dashboard folder sizes,
-                                     free space and the dashboard log size
+                                     free space and the dashboard log sizes
  12) Snapshot file / data source   - shows the snapshot the dashboard reads,
                                      auto-detects it in every Wine prefix, or lets
                                      you type a path. You can enter the file itself,
@@ -136,6 +140,29 @@ leave it and return to the main menu. Nothing is changed when you do that — th
 running dashboard, the saved settings and MetaTrader 5 stay untouched. This
 works for the folder, port, password and path prompts and for every yes/no
 question.
+
+### Service submenu (menu 5)
+
+The auto-start service/task is managed in one place; **Remove auto-start
+service** stays as menu 6 on purpose.
+
+  1) Status / details              - installed? enabled? running? pid, port, URL
+                                     and where the logs are
+  2) Install and enable            - writes the unit/task and starts the dashboard
+                                     now; it also starts at every boot/login
+  3) Start now                     - start through systemd / launchd / the task
+  4) Stop now                      - stop now, keep it installed and enabled
+                                     (it comes back at the next boot/login)
+  5) Restart now                   - restart through the service manager
+  6) Enable at boot/login          - `systemctl enable`, `launchctl enable`,
+                                     `Enable-ScheduledTask`
+  7) Disable at boot/login         - `systemctl disable`, `launchctl disable`,
+                                     `Disable-ScheduledTask`; a running dashboard
+                                     keeps running until you stop it
+
+Starting the dashboard manually (menu 2) while the service is enabled prints a
+note, because the service would start a second copy at the next login; stopping
+it from menu 3 stops the service too so nothing restarts behind your back.
 
 ### Snapshot / data source
 
@@ -250,9 +277,35 @@ This installs:
   starts at boot. Run as root for a system-wide service; otherwise it becomes
   a user service that survives logout (`loginctl enable-linger`).
 - **macOS** — a per-user LaunchAgent that starts at login and restarts the app
-  if it crashes (`launchctl list | grep mapsim`).
+  only if it crashes (`launchctl list | grep mapsim`).
 - **Windows** — a scheduled task `MapsimDashboard` that starts at logon and
   restarts on failure (`Get-ScheduledTask MapsimDashboard`).
+
+Restarts are capped on every operating system (systemd `StartLimitBurst`,
+launchd `ThrottleInterval`, task `RestartCount 3`), so a broken install cannot
+spin forever in the background. After installing, `Mapsim_BOT` → **5) Service
+management** has start / stop / restart / enable / disable / status; **6) Remove
+auto-start service** uninstalls it.
+
+When you stop the dashboard (menu 3, `Mapsim_BOT --stop`), the menu stops every
+process of the packaged app — PyInstaller onefile runs a parent and a child, and
+killing only one leaves the other holding the port — and also stops the service
+when it is enabled, so nothing restarts behind your back. An update restarts the
+service afterwards with the new version.
+
+### Background processes and logs
+
+- The dashboard runs as one process tree. `Mapsim_BOT --status` shows the PID,
+  port and URL; `Mapsim_BOT --stop` stops the whole tree and verifies the port
+  was released.
+- Only startup and error lines are logged (HTTP access lines are off in the
+  dashboard itself). `dashboard.log` is capped: past 256 KB the newest 200
+  lines are kept, and the same rule applies to the app's own windowed-build log.
+  Nothing grows without bound.
+- Service output goes to the service manager (systemd journal, `journalctl
+  --user -u mapsim-dashboard`) or to the same capped `dashboard.log` on macOS,
+  so access logs never fill the disk.
+
 
 To remove the service (the app stays installed):
 

@@ -17,6 +17,8 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "MapsimDashboard"
+LOG_MAX_BYTES = 1_000_000
+LOG_KEEP_BYTES = 200_000
 
 
 def data_dir() -> Path:
@@ -27,12 +29,28 @@ def data_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / APP_NAME
 
 
+def trim_log(path: Path) -> None:
+    """Keep the newest part of a log that grew too large (no unbounded files)."""
+    try:
+        if path.stat().st_size <= LOG_MAX_BYTES:
+            return
+        with path.open("rb") as handle:
+            handle.seek(-LOG_KEEP_BYTES, 2)
+            tail = handle.read()
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_bytes(tail)
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
 def safe_streams() -> Path | None:
     if sys.stdout is not None and sys.stderr is not None:
         return None
     log_path = data_dir() / "dashboard.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        trim_log(log_path)
         stream = log_path.open("a", encoding="utf-8", buffering=1)
     except OSError:
         stream = open(os.devnull, "w", encoding="utf-8")

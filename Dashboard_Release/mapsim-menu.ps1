@@ -33,6 +33,8 @@ $EnvFile = Join-Path $ConfigDir 'dashboard-access.env'
 $PidFile = Join-Path $ConfigDir 'dashboard.pid'
 $PortFile = Join-Path $ConfigDir 'dashboard.port'
 $LogFile = Join-Path $ConfigDir 'dashboard.log'
+$LogMaxBytes = 262144
+$LogKeepLines = 200
 $TaskName = 'MapsimDashboard'
 
 function Test-Installed { Test-Path $Binary }
@@ -72,17 +74,46 @@ function New-RandomPassword {
   ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
 }
 
-function Get-DashboardPid {
+function Get-DashboardPids {
+  $ids = @()
   if (Test-Path $PidFile) {
     $pidValue = (Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($pidValue) {
-      $proc = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
-      if ($proc) { return [int]$pidValue }
-    }
+    if ($pidValue -and (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) { $ids += [int]$pidValue }
   }
-  $mine = Get-Process | Where-Object { $_.Path -eq $Binary } | Select-Object -First 1
-  if ($mine) { return $mine.Id }
+  # PyInstaller --onefile runs a bootloader parent and a child; take both.
+  foreach ($proc in (Get-Process -ErrorAction SilentlyContinue)) {
+    if ($proc.Id -eq $PID) { continue }
+    $procPath = $null
+    try { $procPath = $proc.Path } catch { continue }
+    if ($procPath -eq $Binary) { $ids += $proc.Id }
+  }
+  return @($ids | Select-Object -Unique)
+}
+
+function Get-DashboardPid {
+  $ids = @(Get-DashboardPids)
+  if ($ids.Count -gt 0) { return $ids[0] }
   return $null
+}
+
+function Trim-Log([string]$Path) {
+  if (-not (Test-Path $Path)) { return }
+  $item = Get-Item $Path -ErrorAction SilentlyContinue
+  if (-not $item -or $item.Length -le $LogMaxBytes) { return }
+  try { Get-Content $Path -Tail $LogKeepLines | Set-Content $Path -Encoding UTF8 } catch { }
+}
+
+function Trim-Logs {
+  Trim-Log $LogFile
+  Trim-Log "$LogFile.err"
+}
+
+function Wait-Dashboard([int]$Port, [int]$Seconds) {
+  for ($i = 0; $i -lt $Seconds; $i++) {
+    if (Test-DashboardUp $Port) { return $true }
+    Start-Sleep -Seconds 1
+  }
+  return $false
 }
 
 function Test-PortListening([int]$Port) {
@@ -139,6 +170,7 @@ function Install-Dashboard {
     $expected = ((Get-Content (Join-Path $tmp "$asset.sha256")) -split '\s+')[0].ToLower()
     $actual = (Get-FileHash (Join-Path $tmp $asset) -Algorithm SHA256).Hash.ToLower()
     if ($expected -ne $actual) { throw "checksum mismatch for $asset" }
+    $hadService = Test-ServiceRunning
     Stop-Dashboard | Out-Null
     if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
     New-Item -ItemType Directory -Force $AppDir | Out-Null
@@ -150,6 +182,10 @@ function Install-Dashboard {
   Install-Self
   Write-Shim
   Write-Host "installed: $AppDir"
+  if ($hadService) {
+    Start-ServiceTask
+    Write-Host 'auto-start task started again with the new version.'
+  }
 }
 
 function Install-Self {
@@ -158,11 +194,23 @@ function Install-Self {
 }
 
 function Install-Service {
-  $action = New-ScheduledTaskAction -Execute $Binary -Argument '--no-browser' -WorkingDirectory $AppDir
+  # One dashboard only: the task starts immediately, so a manually started
+  # instance would fight for the port.
+  if ((Get-DashboardPid) -and -not (Test-ServiceRunning)) {
+    Write-Host 'stopping the manually started dashboard - the task will run it.'
+    Stop-Dashboard | Out-Null
+  }
+  $servicePort = Get-CurrentPort
+  $action = New-ScheduledTaskAction -Execute $Binary -Argument "--no-browser --port $servicePort" -WorkingDirectory $AppDir
   $trigger = New-ScheduledTaskTrigger -AtLogOn
   $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel LeastPrivilege
-  $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries
+  # Restarts are capped (3 tries, one minute apart); no 72-hour execution limit.
+  $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+  Enable-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+  Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+  Set-Content $PortFile $servicePort -Encoding ASCII
 }
 
 function Remove-Service {
@@ -173,22 +221,71 @@ function Test-ServiceInstalled {
   return [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)
 }
 
+function Test-ServiceRunning {
+  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if (-not $task) { return $false }
+  return $task.State -eq 'Running'
+}
+
+function Test-ServiceEnabled {
+  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if (-not $task) { return $false }
+  return $task.State -ne 'Disabled'
+}
+
+function Start-ServiceTask {
+  if (Test-ServiceInstalled) { Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+}
+
+function Stop-ServiceTask {
+  if (Test-ServiceInstalled) { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+}
+
+function Restart-ServiceTask {
+  Stop-ServiceTask
+  Start-Sleep -Seconds 1
+  Start-ServiceTask
+}
+
+function Enable-ServiceTask {
+  if (Test-ServiceInstalled) { Enable-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null }
+}
+
+function Disable-ServiceTask {
+  if (Test-ServiceInstalled) { Disable-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null }
+}
+
 function Stop-Dashboard {
-  $id = Get-DashboardPid
-  if (-not $id) {
-    Write-Host 'the dashboard is not running.'
+  $wasService = Test-ServiceRunning
+  if ($wasService) {
+    Stop-ServiceTask
+    Write-Host 'auto-start task stopped (it starts again at the next logon; menu 6 removes it).'
+  }
+  $ids = @(Get-DashboardPids)
+  if ($ids.Count -eq 0) {
+    if (-not $wasService) { Write-Host 'the dashboard is not running.' }
     if (Test-Path $PidFile) { Remove-Item $PidFile -ErrorAction SilentlyContinue }
+    Trim-Logs
     return
   }
-  Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+  foreach ($procId in $ids) { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue }
   if (Test-Path $PidFile) { Remove-Item $PidFile -ErrorAction SilentlyContinue }
-  Write-Host "dashboard stopped (pid $id)."
+  Write-Host ("dashboard stopped (pids: {0})." -f ($ids -join ' '))
+  Trim-Logs
 }
 
 function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
   if (Get-DashboardPid) {
     Write-Host "the dashboard is already running (pid $(Get-DashboardPid))."
     return
+  }
+  if (Test-ServiceInstalled) {
+    if (Test-ServiceRunning) {
+      Stop-ServiceTask
+      Write-Host 'note: the auto-start task was stopped for this manual start (it starts again at the next logon).'
+    } else {
+      Write-Host 'note: the auto-start task is installed and will start the dashboard again at the next logon (menu 6 removes it).'
+    }
   }
   if (Test-PortListening $Port) {
     Write-Host "error: port $Port is already used by another program." -ForegroundColor Red
@@ -198,6 +295,7 @@ function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
   $env:MAPSIM_DASHBOARD_BIND = $Bind
   $env:MAPSIM_DASHBOARD_PASSWORD = $Pwd
   New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+  Trim-Logs
   $proc = Start-Process -FilePath $Binary -ArgumentList '--no-browser', "--port", "$Port" -WorkingDirectory $AppDir -WindowStyle Hidden -RedirectStandardOutput $LogFile -RedirectStandardError "$LogFile.err" -PassThru
   Set-Content $PidFile $proc.Id
   for ($i = 0; $i -lt 20; $i++) {
@@ -214,6 +312,7 @@ function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
     Start-Sleep -Seconds 1
   }
   Write-Host "error: the dashboard did not answer on port $Port; see $LogFile" -ForegroundColor Red
+  if (Test-Path $LogFile) { Get-Content $LogFile -Tail 5 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" } }
 }
 
 function Show-Disk {
@@ -236,6 +335,13 @@ function Show-Disk {
     }
   }
   Write-Host ''
+  foreach ($f in @($LogFile, "$LogFile.err")) {
+    if (Test-Path $f) {
+      $mb = [math]::Round((Get-Item $f).Length / 1MB, 2)
+      Write-Host ("  log {0} MB  {1}" -f $mb, $f)
+    }
+  }
+  Write-Host 'logs are trimmed automatically above 256 KB (the newest lines are kept).'
   Write-Host 'hint: free up space by removing old dashboard logs or an unused MT5 copy.'
 }
 
@@ -253,7 +359,16 @@ function Show-Status {
   if ($null -ne $sysDrive.Used -and ($sysDrive.Used + $sysDrive.Free) -gt 0) {
     Write-Host ("disk      : {0} GB free of {1} GB ({2}% used)" -f [math]::Round($sysDrive.Free / 1GB, 1), [math]::Round(($sysDrive.Used + $sysDrive.Free) / 1GB, 1), [math]::Round($sysDrive.Used / ($sysDrive.Used + $sysDrive.Free) * 100))
   }
-  if (Test-ServiceInstalled) { Write-Host 'service   : installed (auto-start at logon)' } else { Write-Host 'service   : not installed' }
+  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if ($task) {
+    $stateText = 'enabled'
+    if ($task.State -eq 'Disabled') { $stateText = 'disabled' }
+    $runText = 'stopped'
+    if ($task.State -eq 'Running') { $runText = 'running' }
+    Write-Host "service   : installed, $stateText, $runText"
+  } else {
+    Write-Host 'service   : not installed'
+  }
 }
 
 function Read-Default([string]$Prompt, [string]$Default) {
@@ -337,6 +452,112 @@ function Choose-Port {
   return $p
 }
 
+function Show-ServiceStatus {
+  Write-Host 'auto-start task:'
+  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if ($task) {
+    Write-Host '  installed : yes'
+    $stateText = 'enabled (starts at the next logon)'
+    if ($task.State -eq 'Disabled') { $stateText = 'no (choose 6 to enable it)' }
+    Write-Host "  enabled   : $stateText"
+    $runText = 'no'
+    if ($task.State -eq 'Running') { $runText = 'yes' }
+    Write-Host "  running   : $runText"
+  } else {
+    Write-Host '  installed : no (choose 2 to install it)'
+    Write-Host '  enabled   : -'
+    Write-Host '  running   : -'
+  }
+  $id = Get-DashboardPid
+  $port = Get-CurrentPort
+  if ($id) {
+    Write-Host "  dashboard : pid $id, port $port"
+    if ((Get-CurrentBind) -eq '0.0.0.0') { Write-Host "  url       : http://<this-pc-ip>:$port/" }
+    else { Write-Host "  url       : http://127.0.0.1:$port/" }
+  } else {
+    Write-Host '  dashboard : not running'
+  }
+  Write-Host "  logs      : $LogFile (trimmed automatically above 256 KB)"
+}
+
+function Invoke-ServiceAction([string]$Action) {
+  if (-not (Test-Installed)) { Write-Host 'the dashboard is not installed yet - use menu 4.'; return }
+  if (-not (Test-ServiceInstalled)) { Write-Host 'the auto-start task is not installed - choose 2 first.'; return }
+  $port = Get-CurrentPort
+  switch ($Action) {
+    'start' {
+      Start-ServiceTask
+      Write-Host 'start requested.'
+      if (Wait-Dashboard $port 15) { Write-Host "dashboard is up: http://127.0.0.1:$port/" }
+      else { Write-Host "it did not answer on port $port - see status (1)." }
+    }
+    'stop' {
+      Stop-ServiceTask
+      Stop-Dashboard | Out-Null
+      Write-Host 'task stopped. It starts again at the next logon while it is enabled.'
+    }
+    'restart' {
+      Restart-ServiceTask
+      Write-Host 'restart requested.'
+      if (Wait-Dashboard $port 15) { Write-Host "dashboard is up: http://127.0.0.1:$port/" }
+      else { Write-Host "it did not answer on port $port - see status (1)." }
+    }
+    'enable' {
+      Enable-ServiceTask
+      Write-Host 'enabled: the dashboard starts automatically at the next logon.'
+    }
+    'disable' {
+      Disable-ServiceTask
+      Write-Host 'disabled: it will not start automatically any more. The running dashboard keeps running until you stop it (4).'
+    }
+  }
+}
+
+function Show-ServiceMenu {
+  while ($true) {
+    Clear-Host
+    Write-Host ''
+    Write-Host 'auto-start task'
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task) {
+      $stateText = 'enabled'
+      if ($task.State -eq 'Disabled') { $stateText = 'disabled' }
+      $runText = 'stopped'
+      if ($task.State -eq 'Running') { $runText = 'running' }
+      Write-Host ("  installed, {0}, {1} (port {2})" -f $stateText, $runText, (Get-CurrentPort))
+    } else {
+      Write-Host '  not installed'
+    }
+    Write-Host ''
+    Write-Host '  1) Status / details'
+    Write-Host '  2) Install and enable (start now and at every logon)'
+    Write-Host '  3) Start now'
+    Write-Host '  4) Stop now'
+    Write-Host '  5) Restart now'
+    Write-Host '  6) Enable at logon'
+    Write-Host '  7) Disable at logon'
+    Write-Host '  0) Back to the main menu'
+    $m = Read-Default 'choose 1-7' '1'
+    if ($m -eq '0') { return }
+    switch ($m) {
+      '1' { Show-ServiceStatus }
+      '2' {
+        if (Test-Installed) {
+          Install-Service
+          Write-Host 'task installed and enabled: the dashboard starts now and at every logon.'
+        } else { Write-Host 'not installed yet - use menu 4.' }
+      }
+      '3' { Invoke-ServiceAction 'start' }
+      '4' { Invoke-ServiceAction 'stop' }
+      '5' { Invoke-ServiceAction 'restart' }
+      '6' { Invoke-ServiceAction 'enable' }
+      '7' { Invoke-ServiceAction 'disable' }
+      default { Write-Host 'please choose 1-7.' }
+    }
+    $null = Read-Host "`nPress Enter to continue"
+  }
+}
+
 function Show-Menu {
   while ($true) {
     Clear-Host
@@ -375,7 +596,7 @@ function Show-Menu {
     Ui-Item '2' 'Start dashboard'
     Ui-Item '3' 'Stop dashboard'
     Ui-Item '4' 'Install / update dashboard'
-    Ui-Item '5' 'Enable auto-start service'
+    Ui-Item '5' 'Service management (start/stop/restart/enable/disable)'
     Ui-Item '6' 'Remove auto-start service'
     Ui-Item '7' 'Access mode / password'
     Ui-Item '8' 'Uninstall everything'
@@ -413,11 +634,7 @@ function Show-Menu {
       }
       '3' { Stop-Dashboard }
       '4' { Install-Dashboard }
-      '5' {
-        if (-not (Test-Installed)) { Write-Host 'not installed yet - use menu 4.'; continue }
-        Install-Service
-        Write-Host 'service installed: the dashboard now starts automatically at logon.'
-      }
+      '5' { Show-ServiceMenu }
       '6' {
         if (-not (Test-ServiceInstalled)) { Write-Host 'no service is installed.'; continue }
         $a = Read-Default 'remove the auto-start service? (y/n)' 'y'
@@ -647,7 +864,7 @@ if ($Bootstrap) {
   }
   if ($Service) {
     Install-Service
-    Write-Host 'service installed: starts automatically at logon.'
+    Write-Host 'task installed and enabled: the dashboard starts now and at every logon.'
   } elseif (-not $NoLaunch) {
     if (-not (Get-DashboardPid)) {
       Write-Host ''

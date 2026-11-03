@@ -210,9 +210,15 @@ The same actions are also available as installer flags (`--public`,
   and choose **7) Access mode / password** (or reinstall with `--public` /
   `-Public`): it binds to all network interfaces with a password (user
   `mapsim`). Plain HTTP, so prefer a trusted network or put it behind HTTPS.
-- **Start automatically after every reboot** — `Mapsim_BOT` menu 5 (or
-  `--service` / `-Service`): systemd on Linux, LaunchAgent on macOS, a
-  scheduled task on Windows.
+- **Start automatically after every reboot** — `Mapsim_BOT` menu 5 opens the
+  service submenu (status, install + enable, start, stop, restart, enable or
+  disable at boot/login), or reinstall with `--service` / `-Service`: systemd
+  on Linux, LaunchAgent on macOS, a scheduled task on Windows. Menu 6 removes
+  the service.
+- **Stop for real** — menu 3 stops every process of the dashboard (including
+  the child that PyInstaller onefile starts), frees the port and also stops the
+  auto-start service, so nothing restarts in the background. Logs stay small
+  automatically: past 256 KB only the newest lines remain.
 - **Install or update the Expert Advisor** — `Mapsim_BOT` menu 9 finds your
   MetaTrader 5 folder, downloads the newest EA release and copies the expert,
   include files, libraries and sounds into place; menu 10 checks for a newer

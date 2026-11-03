@@ -21,6 +21,10 @@ ENV_FILE="$CONFIG_DIR/mapsim-dashboard.env"
 PID_FILE="$CONFIG_DIR/dashboard.pid"
 PORT_FILE="$CONFIG_DIR/dashboard.port"
 LOG_FILE="$CONFIG_DIR/dashboard.log"
+# Logs are capped so a long-running dashboard never fills the disk: past this
+# size only the newest lines are kept. 256 KB holds thousands of startup lines.
+LOG_MAX_BYTES=262144
+LOG_KEEP_LINES=200
 WRAPPER="$HOME/.local/bin/mapsim-dashboard"
 SERVICE_NAME="mapsim-dashboard.service"
 LABEL="com.mapsim.dashboard"
@@ -152,16 +156,94 @@ dashboard_up() {
   [ "$code" = "200" ] || [ "$code" = "401" ]
 }
 
+# True when the process is still running. A process started by this menu is
+# our child, so after it exits it stays a zombie until the shell reaps it and
+# "kill -0" keeps answering yes; the stat check avoids a pointless 10s wait.
+process_alive() {
+  [ -n "$1" ] || return 1
+  st=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')
+  case "$st" in
+    ''|*Z*) return 1 ;;
+  esac
+  return 0
+}
+
 # PID of our dashboard process, or empty.
 dashboard_pid() {
   if [ -f "$PID_FILE" ]; then
     pid=$(cat "$PID_FILE" 2>/dev/null || true)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    if process_alive "$pid"; then
       echo "$pid"
       return
     fi
   fi
   pgrep -f "$BINARY" 2>/dev/null | head -n 1 || true
+}
+
+# Every process of our dashboard: the pid file first, then anything running the
+# installed binary. PyInstaller --onefile runs a bootloader parent plus a child,
+# so stopping a single pid can leave an orphan holding the port.
+dashboard_pids() {
+  seen=""
+  if [ -f "$PID_FILE" ]; then
+    p=$(cat "$PID_FILE" 2>/dev/null || true)
+    case "$p" in
+      ''|*[!0-9]*) : ;;
+      *)
+        if process_alive "$p"; then
+          seen="$p"
+          printf '%s\n' "$p"
+        fi
+        ;;
+    esac
+  fi
+  for p in $(pgrep -f "$BINARY" 2>/dev/null || true); do
+    [ "$p" = "$$" ] && continue
+    case " $seen " in *" $p "*) continue ;; esac
+    process_alive "$p" || continue
+    seen="$seen $p"
+    printf '%s\n' "$p"
+  done
+}
+
+# Log that the packaged app writes itself when it runs without a console
+# (macOS .app double-click / Windows). The menu log is separate.
+app_log_file() {
+  case "$OS" in
+    Darwin) printf '%s\n' "$HOME/Library/Application Support/MapsimDashboard/dashboard.log" ;;
+    *) printf '%s\n' "$HOME/.local/share/MapsimDashboard/dashboard.log" ;;
+  esac
+}
+
+# Keep logs useful but small: past LOG_MAX_BYTES only the last lines survive.
+trim_log() {
+  f=$1
+  [ -f "$f" ] || return 0
+  bytes=$(wc -c <"$f" 2>/dev/null | tr -d ' ')
+  case "$bytes" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$bytes" -gt "$LOG_MAX_BYTES" ]; then
+    tail -n "$LOG_KEEP_LINES" "$f" > "$f.mapsim-tmp" 2>/dev/null && mv "$f.mapsim-tmp" "$f"
+  fi
+  return 0
+}
+
+trim_logs() {
+  trim_log "$LOG_FILE"
+  trim_log "$LOG_FILE.err"
+  trim_log "$(app_log_file)"
+}
+
+# wait_dashboard <port> [seconds] - wait until our dashboard answers.
+wait_dashboard() {
+  wport=$1
+  wleft=${2:-20}
+  wi=0
+  while [ "$wi" -lt "$wleft" ]; do
+    if dashboard_up "$wport"; then return 0; fi
+    wi=$((wi + 1))
+    sleep 1
+  done
+  return 1
 }
 
 current_bind() {
@@ -611,7 +693,9 @@ download_and_install() {
   else
     (cd "$tmp" && shasum -a 256 -c "$asset.sha256") || { rm -rf "$tmp"; return 1; }
   fi
-  stop_dashboard >/dev/null 2>&1 || true
+  had_service=0
+  if service_installed && service_active; then had_service=1; fi
+  stop_dashboard --force >/dev/null 2>&1 || true
   if [ "$OS" = "Darwin" ]; then
     mkdir -p "$HOME/Applications"
     rm -rf "$APP_ROOT"
@@ -639,6 +723,10 @@ EOF
   install_self
   install_command_link
   echo "installed: $APP_ROOT"
+  if [ "$had_service" -eq 1 ]; then
+    service_start
+    echo "auto-start service restarted with the new version."
+  fi
 }
 
 # ---------------------------------------------------------------- service
@@ -662,16 +750,125 @@ service_active() {
       launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1
       ;;
     Linux)
-      if [ "$(id -u)" -eq 0 ]; then
-        systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null
+      unit_cmd is-active --quiet 2>/dev/null
+      ;;
+  esac
+}
+
+# Run a systemctl action against the dashboard unit, as root or as the user.
+unit_cmd() {
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl "$@" "$SERVICE_NAME"
+  else
+    systemctl --user "$@" "$SERVICE_NAME"
+  fi
+}
+
+# True when the service currently has a live process (for display).
+service_running() {
+  case "$OS" in
+    Darwin) launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -q 'state = running' ;;
+    Linux) unit_cmd is-active --quiet 2>/dev/null ;;
+  esac
+}
+
+# Will the service start by itself at the next boot/login?
+service_enabled() {
+  case "$OS" in
+    Darwin)
+      [ -f "$HOME/Library/LaunchAgents/$LABEL.plist" ] || return 1
+      if launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep -q "\"$LABEL\" => disabled"; then
+        return 1
+      fi
+      return 0
+      ;;
+    Linux)
+      unit_cmd is-enabled --quiet 2>/dev/null
+      ;;
+  esac
+}
+
+service_start() {
+  case "$OS" in
+    Darwin)
+      if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+        launchctl kickstart "gui/$(id -u)/$LABEL" >/dev/null 2>&1
       else
-        systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null
+        launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$LABEL.plist" >/dev/null 2>&1
+      fi
+      ;;
+    Linux)
+      unit_cmd start
+      ;;
+  esac
+}
+
+# Stop for now, keep the unit/task/agent installed so it returns at boot/login.
+service_stop() {
+  case "$OS" in
+    Darwin)
+      launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/$LABEL.plist" >/dev/null 2>&1 || true
+      ;;
+    Linux)
+      unit_cmd stop
+      ;;
+  esac
+}
+
+service_restart() {
+  case "$OS" in
+    Darwin)
+      launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1
+      ;;
+    Linux)
+      unit_cmd restart
+      ;;
+  esac
+}
+
+service_enable() {
+  case "$OS" in
+    Darwin)
+      launchctl enable "gui/$(id -u)/$LABEL" >/dev/null 2>&1
+      ;;
+    Linux)
+      unit_cmd enable
+      ;;
+  esac
+}
+
+service_disable() {
+  case "$OS" in
+    Darwin)
+      launchctl disable "gui/$(id -u)/$LABEL" >/dev/null 2>&1
+      ;;
+    Linux)
+      unit_cmd disable
+      ;;
+  esac
+}
+
+service_manager_label() {
+  case "$OS" in
+    Darwin) echo "launchd LaunchAgent ($HOME/Library/LaunchAgents/$LABEL.plist), restarts on failure" ;;
+    Linux)
+      if [ "$(id -u)" -eq 0 ]; then
+        echo "systemd unit /etc/systemd/system/$SERVICE_NAME, restarts on failure (5s)"
+      else
+        echo "systemd user unit ~/.config/systemd/user/$SERVICE_NAME, restarts on failure (5s)"
       fi
       ;;
   esac
 }
 
 service_install() {
+  # One dashboard only: the unit/task starts immediately, so a manually started
+  # instance would fight for the port.
+  if [ -n "$(dashboard_pid)" ] && ! service_active; then
+    echo "stopping the manually started dashboard - the service will run it."
+    stop_dashboard --force >/dev/null 2>&1 || true
+  fi
+  svc_port=$(current_port)
   case "$OS" in
     Darwin)
       plist="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -687,6 +884,8 @@ service_install() {
   <array>
     <string>$WRAPPER</string>
     <string>--no-browser</string>
+    <string>--port</string>
+    <string>$svc_port</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -696,13 +895,23 @@ service_install() {
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>$LOG_FILE</string>
+  <key>StandardErrorPath</key>
+  <string>$LOG_FILE</string>
   <key>WorkingDirectory</key>
   <string>$HOME</string>
 </dict>
 </plist>
 EOF
       launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || true
+      launchctl enable "gui/$(id -u)/$LABEL" 2>/dev/null || true
       launchctl bootstrap "gui/$(id -u)" "$plist"
       ;;
     Linux)
@@ -710,11 +919,14 @@ EOF
 Description=Mapsim Live Dashboard (read-only MT5 dashboard)
 After=network-online.target
 Wants=network-online.target
+# Automatic restarts are capped; the service never spins forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
 EnvironmentFile=-$ENV_FILE
-ExecStart=$WRAPPER --no-browser
+ExecStart=$WRAPPER --no-browser --port $svc_port
 Restart=on-failure
 RestartSec=5
 
@@ -735,6 +947,8 @@ RestartSec=5
       fi
       ;;
   esac
+  mkdir -p "$CONFIG_DIR"
+  echo "$svc_port" > "$PORT_FILE"
 }
 
 service_remove() {
@@ -765,22 +979,65 @@ service_remove() {
 
 # ---------------------------------------------------------------- dashboard
 
+# stop_dashboard [ask|--force]
+# Stops every process of the dashboard (bootloader parent and child). When the
+# auto-start service is running it is stopped too, otherwise systemd/launchd
+# would start the dashboard again seconds later. "ask" (the menu 3 default)
+# asks first; --force is used by --stop, updates and restarts.
 stop_dashboard() {
-  pid=$(dashboard_pid)
-  if [ -z "$pid" ]; then
-    echo "the dashboard is not running."
+  mode=${1:-ask}
+  managed=0
+  if service_installed && service_active; then managed=1; fi
+  if [ "$managed" -eq 1 ] && [ "$mode" != "--force" ]; then
+    a=$(ask_default "y" "the dashboard runs from the auto-start service - stop the service too? (y/n)")
+    if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
+      echo "cancelled - the dashboard was not stopped."
+      return 1
+    fi
+  fi
+  if [ "$managed" -eq 1 ]; then
+    service_stop
+    echo "auto-start service stopped (it starts again at the next boot/login; menu 6 removes it)."
+  fi
+  pids=$(dashboard_pids)
+  if [ -z "$pids" ]; then
     rm -f "$PID_FILE"
+    [ "$managed" -eq 0 ] && echo "the dashboard is not running."
+    trim_logs
     return 0
   fi
-  kill "$pid" 2>/dev/null || true
+  pid_list=""
+  for p in $pids; do
+    pid_list="$pid_list $p"
+    kill "$p" 2>/dev/null || true
+  done
   i=0
-  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 10 ]; do
+  while [ "$i" -lt 10 ]; do
+    alive=""
+    for p in $pids; do
+      process_alive "$p" && alive="$alive $p"
+    done
+    [ -z "$alive" ] && break
     sleep 1
     i=$((i + 1))
   done
-  kill -9 "$pid" 2>/dev/null || true
+  # Escalate, and re-scan in case the bootloader left a fresh child behind.
+  for p in $pids $(dashboard_pids); do
+    process_alive "$p" && kill -9 "$p" 2>/dev/null || true
+  done
   rm -f "$PID_FILE"
-  echo "dashboard stopped (pid $pid)."
+  port=$(current_port)
+  i=0
+  while port_listening "$port" && [ "$i" -lt 5 ]; do
+    sleep 1
+    i=$((i + 1))
+  done
+  echo "dashboard stopped (pids:$pid_list)."
+  if port_listening "$port"; then
+    echo "note: port $port is still used by another program."
+  fi
+  trim_logs
+  return 0
 }
 
 # start_dashboard <bind> <password> <port>
@@ -791,6 +1048,15 @@ start_dashboard() {
   if [ -n "$(dashboard_pid)" ]; then
     echo "the dashboard is already running (pid $(dashboard_pid))."
     return 0
+  fi
+  if service_installed; then
+    if service_active; then
+      # A loaded service whose process is gone: stop it so it cannot race us.
+      service_stop
+      echo "note: the auto-start service was stopped for this manual start (it starts again at the next boot/login)."
+    else
+      echo "note: the auto-start service is installed and will start the dashboard again at the next boot/login (menu 6 removes it)."
+    fi
   fi
   if port_listening "$port"; then
     echo "error: port $port is already used by another program." >&2
@@ -803,6 +1069,8 @@ start_dashboard() {
     echo "         start MT5 with the Expert loaded, or set the file in menu 12."
   fi
   mkdir -p "$CONFIG_DIR"
+  # Keep the log small: only the newest startup lines are worth keeping.
+  trim_logs
   nohup "$WRAPPER" --no-browser --port "$port" >>"$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   i=0
@@ -826,6 +1094,7 @@ start_dashboard() {
     i=$((i + 1))
   done
   echo "error: the dashboard did not answer on port $port; see $LOG_FILE" >&2
+  tail -n 5 "$LOG_FILE" 2>/dev/null | sed 's/^/  /' >&2
   return 1
 }
 
@@ -854,10 +1123,11 @@ show_status() {
   [ -n "$bind" ] && echo "bind      : $bind" || echo "bind      : 127.0.0.1 (default)"
   echo "url       : $(access_url)"
   if service_installed; then
-    if service_active; then
-      echo "service   : installed, ACTIVE"
+    if service_enabled; then sen="enabled"; else sen="disabled"; fi
+    if service_running; then
+      echo "service   : installed, $sen, RUNNING"
     else
-      echo "service   : installed, not active"
+      echo "service   : installed, $sen, stopped"
     fi
   else
     echo "service   : not installed"
@@ -1120,7 +1390,7 @@ menu_ea_status() {
 uninstall_everything() {
   service_remove
   remove_command_link
-  stop_dashboard >/dev/null 2>&1 || true
+  stop_dashboard --force >/dev/null 2>&1 || true
   case "$OS" in
     Darwin)
       rm -rf "$APP_ROOT"
@@ -1260,7 +1530,7 @@ menu_start() {
       echo "cancelled - the running dashboard was not changed."
       return
     fi
-    stop_dashboard
+    stop_dashboard --force
   fi
   start_dashboard "$bind" "$password" "$port"
 }
@@ -1275,9 +1545,12 @@ menu_disk() {
       du -sh "$d" 2>/dev/null || true
     fi
   done
-  if [ -f "$LOG_FILE" ]; then
-    echo "log file: $(du -h "$LOG_FILE" 2>/dev/null | awk '{print $1}') ($LOG_FILE)"
-  fi
+  for f in "$LOG_FILE" "$LOG_FILE.err" "$(app_log_file)"; do
+    if [ -f "$f" ]; then
+      echo "log file: $(du -h "$f" 2>/dev/null | awk '{print $1}') ($f)"
+    fi
+  done
+  echo "logs are trimmed automatically above 256 KB (the newest lines are kept)."
   bases=$(mt5_bases 2>/dev/null || true)
   if [ -n "$bases" ]; then
     echo ""
@@ -1385,7 +1658,7 @@ menu_snapshot() {
         echo "the dashboard was not restarted (menu 2 to start it later)."
         return
       fi
-      stop_dashboard
+      stop_dashboard --force
       start_dashboard "$bind" "$password" "$port"
     fi
   fi
@@ -1428,7 +1701,7 @@ menu_configure() {
         echo "the dashboard was not restarted (menu 2 to start it later)."
         return
       fi
-      stop_dashboard
+      stop_dashboard --force
       start_dashboard "$(current_bind)" "$(current_password)" "$port"
     fi
   fi
@@ -1440,7 +1713,147 @@ menu_service_install() {
     return
   fi
   service_install
-  echo "service installed: the dashboard now starts automatically at boot/login."
+  echo "service installed and enabled: the dashboard starts now and at every boot/login."
+}
+
+service_log_hint() {
+  case "$OS" in
+    Darwin) echo "$LOG_FILE and the macOS unified log (log show --last 1h --predicate 'process == \"MapsimDashboard\"')" ;;
+    Linux)
+      if [ "$(id -u)" -eq 0 ]; then
+        echo "$LOG_FILE and journalctl -u $SERVICE_NAME -n 50"
+      else
+        echo "$LOG_FILE and journalctl --user -u $SERVICE_NAME -n 50"
+      fi
+      ;;
+  esac
+}
+
+service_status() {
+  echo "auto-start service:"
+  if service_installed; then
+    echo "  installed : yes"
+    echo "  manager   : $(service_manager_label)"
+    if service_enabled; then
+      echo "  enabled   : yes (starts at the next boot/login)"
+    else
+      echo "  enabled   : no (choose 6 to enable it)"
+    fi
+    if service_running; then
+      echo "  running   : yes (pid $(dashboard_pid || echo '?'))"
+    else
+      echo "  running   : no"
+    fi
+  else
+    echo "  installed : no (choose 2 to install it)"
+    echo "  enabled   : -"
+    echo "  running   : -"
+  fi
+  pid=$(dashboard_pid)
+  port=$(current_port)
+  if [ -n "$pid" ]; then
+    echo "  dashboard : pid $pid, port $port"
+    echo "  url       : $(access_url)"
+  else
+    echo "  dashboard : not running"
+  fi
+  echo "  logs      : $(service_log_hint)"
+}
+
+# One service action from the submenu; asks nothing, prints what it did.
+menu_service_action() {
+  action=$1
+  if ! is_installed; then
+    echo "the dashboard is not installed yet - install it first (menu 4)."
+    return
+  fi
+  if ! service_installed; then
+    echo "the auto-start service is not installed - choose 2 first."
+    return
+  fi
+  port=$(current_port)
+  case "$action" in
+    start|restart)
+      if [ "$OS" = "Darwin" ] && ! service_enabled; then
+        echo "the service is disabled - choose 6 to enable it first."
+        return
+      fi
+      ;;
+  esac
+  case "$action" in
+    start)
+      service_start
+      echo "start requested."
+      if wait_dashboard "$port" 15; then
+        echo "dashboard is up: $(access_url)"
+      else
+        echo "it did not answer on port $port - see status (1) and the service logs."
+      fi
+      ;;
+    stop)
+      service_stop
+      # Kill anything the manager left behind (bootloader child, manual copy).
+      stop_dashboard --force >/dev/null 2>&1 || true
+      echo "service stopped. It starts again at the next boot/login while it is enabled."
+      ;;
+    restart)
+      service_restart
+      echo "restart requested."
+      if wait_dashboard "$port" 15; then
+        echo "dashboard is up: $(access_url)"
+      else
+        echo "it did not answer on port $port - see status (1) and the service logs."
+      fi
+      ;;
+    enable)
+      service_enable
+      echo "enabled: the dashboard starts automatically at the next boot/login."
+      ;;
+    disable)
+      service_disable
+      echo "disabled: it will not start automatically any more. The running dashboard keeps running until you stop it (4)."
+      ;;
+  esac
+}
+
+menu_service() {
+  while true; do
+    if [ -t 1 ]; then clear; fi
+    echo ""
+    echo "auto-start service"
+    if service_installed; then
+      if service_enabled; then se="enabled"; else se="disabled"; fi
+      if service_running; then sr="running"; else sr="stopped"; fi
+      echo "  installed, $se, $sr (port $(current_port))"
+    else
+      echo "  not installed"
+    fi
+    echo ""
+    echo "  1) Status / details"
+    echo "  2) Install and enable (start now and at every boot/login)"
+    echo "  3) Start now"
+    echo "  4) Stop now"
+    echo "  5) Restart now"
+    echo "  6) Enable at boot/login"
+    echo "  7) Disable at boot/login"
+    m=$(ask_default "1" "choose 1-7 (0 = back)")
+    if wants_back "$m"; then
+      echo "back to the main menu."
+      return
+    fi
+    case "$m" in
+      1) service_status ;;
+      2) menu_service_install ;;
+      3) menu_service_action start ;;
+      4) menu_service_action stop ;;
+      5) menu_service_action restart ;;
+      6) menu_service_action enable ;;
+      7) menu_service_action disable ;;
+      *) echo "please choose 1-7." ;;
+    esac
+    printf '%s' "press Enter to continue..."
+    IFS= read -r _ || { echo ""; return; }
+  done
 }
 
 menu_service_remove() {
@@ -1547,7 +1960,7 @@ menu_main() {
     ui_item "2" "Start dashboard"
     ui_item "3" "Stop dashboard"
     ui_item "4" "Install / update dashboard"
-    ui_item "5" "Enable auto-start service"
+    ui_item "5" "Service management (start/stop/restart/enable/disable)"
     ui_item "6" "Remove auto-start service"
     ui_item "7" "Access mode / password"
     ui_item "8" "Uninstall everything"
@@ -1569,7 +1982,7 @@ menu_main() {
       2) menu_start ;;
       3) stop_dashboard ;;
       4) download_and_install ;;
-      5) menu_service_install ;;
+      5) menu_service ;;
       6) menu_service_remove ;;
       7) menu_configure ;;
       8) menu_uninstall ;;
@@ -1665,9 +2078,10 @@ case "${1:-}" in
     show_status
     ;;
   --stop)
-    stop_dashboard
+    stop_dashboard --force
     ;;
   ""|-i|--menu)
+    trim_logs
     menu_main
     ;;
   *)
