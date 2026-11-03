@@ -190,12 +190,12 @@ verifies its SHA-256 checksum, installs it for your user and starts it:
 ### Mapsim BOT control center
 
 After installing, manage everything from one interactive menu — it asks only
-when a decision is needed (local or internet, port, password, service) and does
+when a decision is needed (local or internet, port, license, service) and does
 the rest itself:
 
 ```sh
 Mapsim_BOT          # macOS / Linux: status, start/stop, install/update,
-                    # auto-start service, access mode/password, uninstall
+                    # auto-start service, access mode, license, uninstall
 ```
 
 ```powershell
@@ -206,10 +206,17 @@ The same actions are also available as installer flags (`--public`,
 `--service`, `--remove-service`, `--uninstall`) — see
 [`Dashboard_Release/README.md`](Dashboard_Release/README.md):
 
+- **Enter your license (required)** — the dashboard runs on the same license as
+  the Expert Advisor. The `Mapsim_BOT` license item (13 on macOS/Linux, 12 on
+  Windows) takes the license code, username and password and validates them
+  like the EA (active code, expiry, account number from the live snapshot).
+  Without a valid license the dashboard does not start, and the web sign-in is
+  the license username and password.
 - **Watch the dashboard from the internet / other devices** — run `Mapsim_BOT`
-  and choose **7) Access mode / password** (or reinstall with `--public` /
-  `-Public`): it binds to all network interfaces with a password (user
-  `mapsim`). Plain HTTP, so prefer a trusted network or put it behind HTTPS.
+  and choose **7) Access mode (local / internet)** (or reinstall with
+  `--public` / `-Public`): it binds to all network interfaces and asks for the
+  license credentials on every request. Plain HTTP, so prefer a trusted network
+  or put it behind HTTPS.
 - **Start automatically after every reboot** — `Mapsim_BOT` menu 5 opens the
   service submenu (status, install + enable, start, stop, restart, enable or
   disable at boot/login), or reinstall with `--service` / `-Service`: systemd
@@ -227,7 +234,7 @@ The same actions are also available as installer flags (`--public`,
   dashboard folder sizes and free space. The panel at the top of the menu also
   shows free disk space at all times (green below 75% used, yellow 75–89%,
   red 90% or more).
-- **Point the dashboard at your data** — `Mapsim_BOT` menu 12 shows which
+- **Point the dashboard at your data** — `Mapsim_BOT` menu 12 (macOS/Linux) shows which
   `snapshot.json` the dashboard reads and how old it is. It searches every Wine
   prefix for `MQL5/Files/MapsimLive/snapshot.json`; if your MT5 lives elsewhere,
   type the file, the MQL5 folder or the MT5 folder itself — Windows-style paths
@@ -237,8 +244,8 @@ The same actions are also available as installer flags (`--public`,
   `b` / `back` / `q`) at a prompt to return to the main menu without changing
   anything.
 - **Remove everything** — `Mapsim_BOT` menu 8 (or `install.sh --uninstall` /
-  `install.ps1 -Uninstall`) deletes the app, the auto-start service, the
-  password file and all logs. Nothing touches MetaTrader 5.
+  `install.ps1 -Uninstall`) deletes the app, the auto-start service, the saved
+  license and all logs. Nothing touches MetaTrader 5.
 
 ### Download
 

@@ -19,7 +19,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-SOURCE_FILES = ("live_dashboard.py", "market_engine.py", "mock_feed.py", "news_feed.py")
+SOURCE_FILES = ("live_dashboard.py", "market_engine.py", "mock_feed.py", "news_feed.py", "license_gate.py")
 SOURCE_DIRS = ("web", "Logo")
 SOURCE_EXTRA = ("runtime/candles_sampled.json",)
 ENTRY_FILE = HERE / "entry.py"
@@ -199,6 +199,8 @@ def run_pyinstaller(source: Path, stage: Path, dist: Path, work: Path, name: str
         "certifi",
         "--hidden-import",
         "tzdata",
+        "--hidden-import",
+        "cryptography",
         "--collect-submodules",
         "paramiko",
         "--collect-data",

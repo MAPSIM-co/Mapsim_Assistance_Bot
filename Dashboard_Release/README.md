@@ -69,7 +69,7 @@ export PATH="$HOME/.local/bin:$PATH"
 ## Mapsim BOT control center
 
 `Mapsim_BOT` opens an interactive menu that asks only when a decision is
-needed and does everything else by itself (port checks, passwords, service
+needed and does everything else by itself (port checks, license check, service
 setup):
 
 ```
@@ -83,6 +83,7 @@ setup):
 │  Dashboard : running (pid 4242)                                               │
 │  App       : installed                                                        │
 │  Expert    : v213.1.6                                                         │
+│  License   : saved                                                            │
 │  Access    : internet (0.0.0.0) - port 8766                                   │
 │  URL       : http://203.0.113.10:8766/                                        │
 │  Snapshot  : ok (12s ago)                                                     │
@@ -102,10 +103,11 @@ you can copy it), whether the live snapshot file is being read
 75–89%, red 90% or more).
 
   1) Status                        - installed? running? which port? service? disk?
-  2) Start dashboard               - asks: local only or internet, checks ports,
-                                     asks for a password in internet mode; if the
-                                     dashboard is already running it offers to
-                                     stop it and restart with the new settings
+  2) Start dashboard               - checks the license first (asks for it when
+                                     none is saved), then local only or internet,
+                                     checks ports; if the dashboard is already
+                                     running it offers to stop it and restart with
+                                     the new settings
   3) Stop dashboard                - stops every dashboard process, frees the
                                      port; if the auto-start service is running it
                                      is stopped too (otherwise it would restart it)
@@ -115,7 +117,8 @@ you can copy it), whether the live snapshot file is being read
                                      at boot/login (systemd / LaunchAgent /
                                      scheduled task)
   6) Remove auto-start service     - uninstalls the service/task, keeps the app
-  7) Access mode / password        - switch local <-> internet, set a new password
+  7) Access mode (local / internet)- switch the bind address and restart; the
+                                     dashboard login is always the license
   8) Uninstall everything          - full removal, asks for confirmation first
   9) Expert Advisor: install/update- downloads the newest EA from the newest v*
                                      release tag, copies it (OS-matched .ex5,
@@ -133,12 +136,22 @@ you can copy it), whether the live snapshot file is being read
                                      `C:` and other drive letters are mapped to the
                                      detected Wine prefix and `MQL5/Files/MapsimLive/
                                      snapshot.json` is derived from it
- 13) Exit
+ 13) License (dashboard login)     - enter or update the Mapsim license (license
+                                     code + username + password), show its status
+                                     (user, account, expiry, days left) or remove
+                                     it. The dashboard only starts with a valid,
+                                     unexpired license and uses the same username
+                                     and password for the web sign-in
+ 14) Exit
+
+The Windows menu (`mapsim-menu.ps1`) has no separate snapshot item, so the
+numbering there shifts up by one: **12) License (dashboard login)** and
+**13) Exit**. Every other option number is the same on all platforms.
 
 Inside any of these options, type **0** (or `b` / `back` / `q`) at a prompt to
 leave it and return to the main menu. Nothing is changed when you do that — the
 running dashboard, the saved settings and MetaTrader 5 stay untouched. This
-works for the folder, port, password and path prompts and for every yes/no
+works for the folder, port, license and path prompts and for every yes/no
 question.
 
 ### Service submenu (menu 5)
@@ -163,6 +176,25 @@ service** stays as menu 6 on purpose.
 Starting the dashboard manually (menu 2) while the service is enabled prints a
 note, because the service would start a second copy at the next login; stopping
 it from menu 3 stops the service too so nothing restarts behind your back.
+Installing, starting and restarting through the service check the license too —
+without a valid license the service is not started.
+
+### License
+
+The dashboard runs on the **same license as the Expert Advisor**. Enter it once
+in menu **13**: paste the license code, then the license username and password
+(typed hidden). The values are validated like the EA does — username, password,
+active code, expiry date and the account number read from the live snapshot —
+and are only saved when the license is active. They are stored in
+`~/.mapsim/dashboard.license` and `~/.mapsim/dashboard.auth`
+(`%USERPROFILE%\.mapsim\...` on Windows), readable only by your account.
+
+- No license, an expired license, a wrong username/password or another account
+  in the snapshot → the dashboard is **not started**.
+- If the license expires while the dashboard is running, it shuts itself down.
+- The web sign-in (local and internet) is the license username and password.
+- If the snapshot is not there yet, the dashboard starts with a warning and
+  enforces the account number as soon as the snapshot appears.
 
 ### Snapshot / data source
 
@@ -202,7 +234,7 @@ The installer flags still work when the installer file is run directly
 
 | Option | macOS/Linux | Windows | Effect |
 |---|---|---|---|
-| `--public` / `-Public` | ✓ | ✓ | install with internet access (generated password, user `mapsim`) |
+| `--public` / `-Public` | ✓ | ✓ | install with internet access (sign in with the license) |
 | `--service` / `-Service` | ✓ | ✓ | also enable auto-start after every reboot |
 | `--remove-service` / `-RemoveService` | ✓ | ✓ | remove the auto-start service (keeps the app) |
 | `--uninstall` / `-Uninstall` | ✓ | ✓ | remove the dashboard completely |
@@ -223,18 +255,19 @@ No Python installation is required.
 
 By default the dashboard listens on `127.0.0.1` and can only be opened on the
 same computer. To watch it from other machines (your phone, another computer,
-the office), run it with **public mode**: it binds to `0.0.0.0` and requires a
-password on every request. The easiest way is the control center: run
-`Mapsim_BOT`, choose **7) Access mode / password** (or start with menu 2 and
-pick "internet") — it asks for the password, checks the port and restarts the
-dashboard for you. For scripted installs:
+the office), run it with **public mode**: it binds to `0.0.0.0` and asks for
+the license username and password on every request (the same credentials you
+entered in menu 13). The easiest way is the control center: run `Mapsim_BOT`,
+choose **7) Access mode (local / internet)** (or start with menu 2 and pick
+"internet") — it checks the license and the port and restarts the dashboard for
+you. For scripted installs:
 
 ```sh
 # macOS / Linux (install + start, public)
 sh install.sh --public
 
-# or, for an installed dashboard:
-MAPSIM_DASHBOARD_PASSWORD='your-password' mapsim-dashboard --bind 0.0.0.0 --no-browser
+# or, for an installed dashboard (the license is read from ~/.mapsim):
+mapsim-dashboard --bind 0.0.0.0 --no-browser
 ```
 
 ```powershell
@@ -242,18 +275,18 @@ MAPSIM_DASHBOARD_PASSWORD='your-password' mapsim-dashboard --bind 0.0.0.0 --no-b
 .\install.ps1 -Public
 ```
 
-After that, open `http://<machine-ip>:8765/` from any device and log in with
-user `mapsim` and the printed password. The password is saved in
-`~/.config/mapsim-dashboard/mapsim-dashboard.env` (macOS/Linux) or
-`%APPDATA%\MapsimDashboard\dashboard-access.env` (Windows).
+After that, open `http://<machine-ip>:8765/` from any device and sign in with
+the license username and password. They are stored in
+`~/.mapsim/dashboard.license` and `~/.mapsim/dashboard.auth`
+(`%USERPROFILE%\.mapsim\...` on Windows), readable only by your account.
 
 > Security notes
-> - Password protection is **required** by the app when binding beyond
->   localhost — it refuses to start publicly without one.
+> - The app requires a valid license before it starts, and the web login is the
+>   license username and password — there is no separate dashboard password.
 > - For anything beyond a trusted LAN, put the dashboard behind **HTTPS**
 >   (for example `caddy reverse-proxy --from https://dash.example.com
->   --to 127.0.0.1:8765`) or an **SSH tunnel** / VPN, because the built-in
->   password travels unencrypted over plain HTTP.
+>   --to 127.0.0.1:8765`) or an **SSH tunnel** / VPN, because the sign-in
+>   travels unencrypted over plain HTTP.
 > - On Linux you may need to open the port, e.g. `sudo ufw allow 8765/tcp`.
 > - On Windows the installer adds a firewall rule when it can; otherwise run
 >   PowerShell as Administrator once.
@@ -333,9 +366,9 @@ sh install.sh --uninstall      # macOS/Linux
 
 This removes the app, the auto-start service/task, the `mapsim-dashboard` and
 `Mapsim_BOT` commands, the `PATH` line the installer added to your shell startup
-files, the desktop shortcut / app-menu entry, the saved access password and
-the log folder. Nothing is left behind and MetaTrader 5 / the Expert Advisor
-are never touched. Manual equivalent:
+files, the desktop shortcut / app-menu entry, the saved license (`~/.mapsim`)
+and the log folder. Nothing is left behind and MetaTrader 5 / the Expert
+Advisor are never touched. Manual equivalent:
 
 - **macOS** — quit the app, then delete `~/Applications/MapsimDashboard.app`
   and `~/Library/Application Support/MapsimDashboard`; remove
@@ -452,26 +485,37 @@ Outputs:
 
 ### Verify the build
 
+The dashboard needs a valid license even in demo mode, so the smoke test takes
+a license and the matching username/password:
+
 ```bash
 # macOS
-python smoke_test.py --artifact dist/MapsimDashboard.app
+python smoke_test.py --artifact dist/MapsimDashboard.app \
+  --license-file path/to/test.license --auth-file path/to/test.auth
 
 # Windows
-python smoke_test.py --artifact dist/MapsimDashboard.exe
+python smoke_test.py --artifact dist/MapsimDashboard.exe \
+  --license-file path\to\test.license --auth-file path\to\test.auth
 
 # Linux
-python smoke_test.py --artifact dist/MapsimDashboard
+python smoke_test.py --artifact dist/MapsimDashboard \
+  --license-file path/to/test.license --auth-file path/to/test.auth
 ```
 
-The smoke test starts the app in demo mode on a free port, waits for
-`/api/snapshot`, fetches the bundled page, stylesheet, script and logo, then
-stops the whole process tree and confirms the port was released.
+`test.auth` holds the license username on the first line and its password on
+the second. The smoke test starts the app in demo mode on a free port, signs in
+with those credentials, waits for `/api/snapshot`, fetches the bundled page,
+stylesheet, script and logo, then stops the whole process tree and confirms the
+port was released. The CI workflow creates a short-lived (2-day) license from
+`license_gate` in the private source before this step and deletes it
+afterwards; nothing is committed and nothing is attached to the release.
 
 ### What is bundled
 
 Only these files are copied into the build:
 
-- `live_dashboard.py`, `market_engine.py`, `mock_feed.py`, `news_feed.py`
+- `live_dashboard.py`, `license_gate.py`, `market_engine.py`, `mock_feed.py`,
+  `news_feed.py`
 - `web/` (the UI)
 - `Logo/` (logo and icon)
 - `runtime/candles_sampled.json` (sample candles for the Market tab)

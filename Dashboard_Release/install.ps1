@@ -9,7 +9,7 @@
 #   irm https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.ps1 | iex
 #
 # Options (passed through to the control center):
-#   -Public          allow remote access: bind 0.0.0.0 with a generated password
+#   -Public          allow remote access: bind 0.0.0.0, sign in with the license
 #   -Service         also install a background task that starts at logon
 #   -RemoveService   stop and remove the background task (keeps the app)
 #   -Uninstall       stop the app and the task, then remove everything

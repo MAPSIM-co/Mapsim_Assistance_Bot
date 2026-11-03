@@ -13,7 +13,7 @@
 set -u
 
 REPO="MAPSIM-co/Mapsim_Assistance_Bot"
-FALLBACK_VERSION="dashboard-v1.0.1"
+FALLBACK_VERSION="dashboard-v1.0.2"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
 CONFIG_DIR="$HOME/.config/mapsim-dashboard"
@@ -26,6 +26,9 @@ LOG_FILE="$CONFIG_DIR/dashboard.log"
 LOG_MAX_BYTES=262144
 LOG_KEEP_LINES=200
 WRAPPER="$HOME/.local/bin/mapsim-dashboard"
+LICENSE_DIR="$HOME/.mapsim"
+LICENSE_FILE="$LICENSE_DIR/dashboard.license"
+LICENSE_AUTH_FILE="$LICENSE_DIR/dashboard.auth"
 SERVICE_NAME="mapsim-dashboard.service"
 LABEL="com.mapsim.dashboard"
 
@@ -123,14 +126,8 @@ show_title() {
 
 is_installed() { [ -x "$BINARY" ]; }
 
-gen_password() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 16
-  else
-    LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32
-    echo
-  fi
-}
+# The dashboard login is the license username/password, so the old generated
+# access password is gone. The encoder lives in the app, not in this menu.
 
 # HTTP status of the dashboard on a port: prints 000 when nothing answers.
 http_code() {
@@ -296,10 +293,6 @@ access_url() {
   else
     printf 'http://127.0.0.1:%s/\n' "$port"
   fi
-}
-
-current_password() {
-  [ -f "$ENV_FILE" ] && grep -E '^MAPSIM_DASHBOARD_PASSWORD=' "$ENV_FILE" | tail -n 1 | cut -d= -f2 || true
 }
 
 current_snapshot() {
@@ -506,12 +499,11 @@ ask() {
 
 # ---------------------------------------------------------------- env/wrapper
 
-# write_env_file <bind> <password> [snapshot]
+# write_env_file <bind> [snapshot]
 # snapshot omitted -> keep the stored path or auto-detect it; "" -> no path.
 write_env_file() {
   bind="$1"
-  password="$2"
-  snap=${3-__auto__}
+  snap=${2-__auto__}
   if [ "$snap" = "__auto__" ]; then
     snap=$(current_snapshot)
     if [ -z "$snap" ] || [ ! -f "$snap" ]; then
@@ -522,7 +514,6 @@ write_env_file() {
   chmod 700 "$CONFIG_DIR"
   {
     echo "MAPSIM_DASHBOARD_BIND=$bind"
-    echo "MAPSIM_DASHBOARD_PASSWORD=$password"
     if [ -n "$snap" ]; then
       # quoted: MT5 paths contain spaces, and the launcher sources this file
       echo "MAPSIM_SNAPSHOT='$snap'"
@@ -530,6 +521,274 @@ write_env_file() {
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 }
+
+# ---------------------------------------------------------------- license
+
+license_saved() {
+  [ -s "$LICENSE_FILE" ] && [ -s "$LICENSE_AUTH_FILE" ]
+}
+
+# 0600 temp file for one license check; prints its path.
+license_tmp() {
+  f=$(mktemp "${TMPDIR:-/tmp}/mapsim-license.XXXXXX") || return 1
+  chmod 600 "$f" 2>/dev/null || true
+  printf '%s\n' "$f"
+}
+
+# The check result goes to a file, not stdout: windowed builds (Windows) have
+# no console, so the menu could never read a printed answer there.
+# license_run <license-file> <auth-file> <out-file>
+license_run() {
+  snap=$(current_snapshot)
+  [ -z "$snap" ] && snap=$(find_snapshot)
+  if [ -n "$snap" ] && [ -f "$snap" ]; then
+    "$BINARY" --license-check --license-file "$1" --auth-file "$2" \
+      --file "$snap" --no-browser --license-out "$3" >/dev/null 2>&1
+  else
+    "$BINARY" --license-check --license-file "$1" --auth-file "$2" \
+      --no-browser --license-out "$3" >/dev/null 2>&1
+  fi
+  return 0
+}
+
+# The installed build must know --license-check (older builds do not).
+license_supported() {
+  [ -x "$BINARY" ] || return 1
+  out=$(license_tmp) || return 1
+  "$BINARY" --license-check --license-file "/nonexistent/mapsim.license" \
+    --auth-file "/nonexistent/mapsim.auth" --no-browser --license-out "$out" \
+    >/dev/null 2>&1 || true
+  found=0
+  grep -q '^status=' "$out" 2>/dev/null && found=1
+  rm -f "$out"
+  [ "$found" -eq 1 ]
+}
+
+license_check_saved() {
+  out=$(license_tmp) || return 1
+  license_run "$LICENSE_FILE" "$LICENSE_AUTH_FILE" "$out"
+  cat "$out" 2>/dev/null
+  rm -f "$out"
+  return 0
+}
+
+# Validate values before they are written anywhere; the password only touches
+# a 0600 temp file, never the process list.
+# license_check_values <license> <username> <password>
+license_check_values() {
+  lic=$(license_tmp) || return 1
+  auth=$(license_tmp) || { rm -f "$lic"; return 1; }
+  out=$(license_tmp) || { rm -f "$lic" "$auth"; return 1; }
+  printf '%s\n' "$1" > "$lic"
+  printf '%s\n%s\n' "$2" "$3" > "$auth"
+  license_run "$lic" "$auth" "$out"
+  cat "$out" 2>/dev/null
+  rm -f "$lic" "$auth" "$out"
+  return 0
+}
+
+license_field() {
+  printf '%s\n' "$1" | grep "^$2=" | head -n 1 | cut -d= -f2-
+}
+
+license_save() {
+  mkdir -p "$LICENSE_DIR"
+  chmod 700 "$LICENSE_DIR"
+  printf '%s\n' "$1" > "$LICENSE_FILE"
+  chmod 600 "$LICENSE_FILE"
+  printf '%s\n%s\n' "$2" "$3" > "$LICENSE_AUTH_FILE"
+  chmod 600 "$LICENSE_AUTH_FILE"
+}
+
+license_show_result() {
+  # $1 = raw --license-check output
+  status=$(license_field "$1" status)
+  msg=$(license_field "$1" message)
+  user=$(license_field "$1" user)
+  account=$(license_field "$1" account)
+  expiry=$(license_field "$1" expiry)
+  days=$(license_field "$1" days_left)
+  warning=$(license_field "$1" warning)
+  [ -n "$user" ] && echo "  user    : $user"
+  [ -n "$account" ] && echo "  account : $account"
+  [ -n "$expiry" ] && echo "  expires : $expiry ($days day(s) left)"
+  [ -n "$msg" ] && echo "  status  : $status - $msg"
+  [ -n "$warning" ] && echo "  warning : $warning"
+  return 0
+}
+
+# Interactive gate for anything that starts the dashboard. Offers to enter a
+# license when none is saved, and refuses when the license is invalid.
+license_prepare() {
+  if ! license_supported; then
+    echo "the installed dashboard build does not support the license yet."
+    echo "update it from menu 4 (Install / update dashboard), then enter the license (menu 13)."
+    return 1
+  fi
+  if ! license_saved; then
+    echo "a valid Mapsim license is required to run the dashboard."
+    a=$(ask_default "y" "enter the license now? (y/n, 0 = back)")
+    if wants_back "$a"; then
+      return 1
+    fi
+    if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
+      echo "the dashboard was not started - the license is required (menu 13)."
+      return 1
+    fi
+    menu_license_enter || return 1
+  fi
+  out=$(license_check_saved)
+  if [ "$(license_field "$out" status)" != "ACTIVE" ]; then
+    echo "the license check failed:"
+    license_show_result "$out"
+    echo "the dashboard was not started. Fix the license in menu 13."
+    return 1
+  fi
+  warning=$(license_field "$out" warning)
+  if [ -n "$warning" ]; then
+    echo "warning: $warning"
+  fi
+  return 0
+}
+
+# Non-interactive variant used by start_dashboard itself.
+license_ready() {
+  license_supported || return 1
+  license_saved || return 1
+  out=$(license_check_saved)
+  [ "$(license_field "$out" status)" = "ACTIVE" ]
+}
+
+menu_license_enter() {
+  if ! license_supported; then
+    echo "the installed dashboard build does not support the license yet."
+    echo "update it from menu 4 (Install / update dashboard), then try again."
+    return 1
+  fi
+  printf 'paste your license (0 = back): ' >&2
+  IFS= read -r lic || return 1
+  if wants_back "$lic"; then
+    echo "back."
+    return 1
+  fi
+  if [ -z "$lic" ]; then
+    echo "no license entered."
+    return 1
+  fi
+  printf 'license username (0 = back): ' >&2
+  IFS= read -r user || return 1
+  if wants_back "$user"; then
+    echo "back."
+    return 1
+  fi
+  printf 'license password (0 = back): ' >&2
+  stty -echo 2>/dev/null || true
+  IFS= read -r pass || pass=""
+  stty echo 2>/dev/null || true
+  echo "" >&2
+  if wants_back "$pass"; then
+    echo "back."
+    return 1
+  fi
+  if [ -z "$user" ] || [ -z "$pass" ]; then
+    echo "the username and password must not be empty."
+    return 1
+  fi
+  out=$(license_check_values "$lic" "$user" "$pass")
+  if [ "$(license_field "$out" status)" != "ACTIVE" ]; then
+    echo "this license was rejected:"
+    license_show_result "$out"
+    echo "nothing was saved."
+    return 1
+  fi
+  license_save "$lic" "$user" "$pass"
+  echo "license saved:"
+  license_show_result "$out"
+  days=$(license_field "$out" days_left)
+  case "$days" in
+    ''|*[!0-9]*) ;;
+    *)
+      if [ "$days" -le 7 ]; then
+        echo "warning: this license expires in $days day(s) - renew it soon."
+      fi
+      ;;
+  esac
+  return 0
+}
+
+menu_license_status() {
+  if ! license_supported; then
+    echo "the installed dashboard build does not support the license yet."
+    echo "update it from menu 4 (Install / update dashboard)."
+    return
+  fi
+  if ! license_saved; then
+    echo "license : not set (choose 1 to enter it)"
+    return
+  fi
+  echo "license files:"
+  echo "  $LICENSE_FILE"
+  echo "  $LICENSE_AUTH_FILE"
+  out=$(license_check_saved)
+  license_show_result "$out"
+  if [ "$(license_field "$out" status)" = "ACTIVE" ]; then
+    echo "license : ACTIVE"
+  else
+    echo "license : NOT ACTIVE - the dashboard will not start (choose 1 to fix it)"
+  fi
+}
+
+menu_license_remove() {
+  if ! license_saved; then
+    echo "no license is saved."
+    return
+  fi
+  a=$(ask_default "n" "remove the saved license? the dashboard will not start without it (y/n, 0 = back)")
+  if wants_back "$a"; then
+    return
+  fi
+  case "$a" in
+    y|Y) ;;
+    *) echo "cancelled."; return ;;
+  esac
+  rm -f "$LICENSE_FILE" "$LICENSE_AUTH_FILE"
+  rmdir "$LICENSE_DIR" 2>/dev/null || true
+  echo "license removed."
+}
+
+menu_license() {
+  while true; do
+    if [ -t 1 ]; then clear; fi
+    show_title
+    echo "License"
+    echo "  dashboard login uses the license username/password"
+    if license_saved; then
+      echo "  saved: yes ($LICENSE_FILE)"
+    else
+      echo "  saved: no"
+    fi
+    echo ""
+    echo "  1) Enter / update license"
+    echo "  2) Show license status"
+    echo "  3) Remove saved license"
+    echo "  0) Back to the main menu"
+    printf '\n%s' "${CYAN}choose 1-3 (0 = back):${NC} "
+    if ! IFS= read -r c; then
+      echo ""
+      exit 0
+    fi
+    case "$c" in
+      0|b|B|back|q|Q|quit) return ;;
+      1) menu_license_enter ;;
+      2) menu_license_status ;;
+      3) menu_license_remove ;;
+      *) echo "please choose 1-3." ;;
+    esac
+    printf '%s' "${CYAN}Press Enter to continue...${NC}"
+    IFS= read -r _ || { echo ""; exit 0; }
+  done
+}
+
 
 write_wrapper() {
   mkdir -p "$HOME/.local/bin"
@@ -1040,14 +1299,18 @@ stop_dashboard() {
   return 0
 }
 
-# start_dashboard <bind> <password> <port>
+# start_dashboard <bind> <port>
 start_dashboard() {
   bind="$1"
-  password="$2"
-  port="$3"
+  port="$2"
   if [ -n "$(dashboard_pid)" ]; then
     echo "the dashboard is already running (pid $(dashboard_pid))."
     return 0
+  fi
+  if ! license_ready; then
+    echo "error: a valid Mapsim license is required - the dashboard was not started." >&2
+    echo "open menu 13 (License) and enter or fix the license." >&2
+    return 1
   fi
   if service_installed; then
     if service_active; then
@@ -1062,7 +1325,7 @@ start_dashboard() {
     echo "error: port $port is already used by another program." >&2
     return 1
   fi
-  write_env_file "$bind" "$password"
+  write_env_file "$bind"
   snap=$(current_snapshot)
   if [ -z "$snap" ] || [ ! -f "$snap" ]; then
     echo "warning: no Mapsim snapshot was found in any MT5 folder."
@@ -1086,7 +1349,7 @@ start_dashboard() {
         else
           echo "  remote  : http://<this-computer-ip>:$port/ (allow the port through your firewall)"
         fi
-        echo "  access  : user 'mapsim' / password '$password'"
+        echo "  access  : the license username and password (menu 13)"
       fi
       return 0
     fi
@@ -1143,6 +1406,21 @@ show_status() {
     fi
   else
     echo "snapshot  : not found (no MQL5/Files/MapsimLive/snapshot.json - menu 12)"
+  fi
+  if ! license_saved; then
+    echo "license   : not set (menu 13 - required to start)"
+  elif ! license_supported; then
+    echo "license   : saved (the installed build is too old - menu 4)"
+  else
+    out=$(license_check_saved)
+    lstatus=$(license_field "$out" status)
+    luser=$(license_field "$out" user)
+    lexp=$(license_field "$out" expiry)
+    if [ "$lstatus" = "ACTIVE" ]; then
+      echo "license   : ACTIVE - $luser, expires $lexp"
+    else
+      echo "license   : $lstatus ($(license_field "$out" message)) - dashboard will not start"
+    fi
   fi
 }
 
@@ -1405,57 +1683,11 @@ uninstall_everything() {
   rm -f "$MENU_DEST"
   rmdir "$HOME/.local/share/MapsimDashboard" 2>/dev/null || true
   rm -rf "$CONFIG_DIR"
+  rm -rf "$LICENSE_DIR"
   echo "Mapsim Live Dashboard removed completely (MT5 and the EA were not touched)."
 }
 
 # ---------------------------------------------------------------- interactive
-
-prompt_password() {
-  # Reuse existing password on empty input; otherwise require 8+ chars twice.
-  existing=$(current_password)
-  while true; do
-    if [ -n "$existing" ]; then
-      printf 'password (press Enter to keep the current one, 0 = back): ' >&2
-    else
-      printf 'password (min 8 characters, 0 = back): ' >&2
-    fi
-    stty -echo 2>/dev/null || true
-    IFS= read -r p1 || p1=""
-    stty echo 2>/dev/null || true
-    echo "" >&2
-    if wants_back "$p1"; then
-      return 1
-    fi
-    if [ -z "$p1" ] && [ -n "$existing" ]; then
-      echo "$existing"
-      return
-    fi
-    if [ -z "$p1" ]; then
-      p1=$(gen_password)
-      echo "generated password: $p1" >&2
-      echo "$p1"
-      return
-    fi
-    if [ "${#p1}" -lt 8 ]; then
-      echo "too short - at least 8 characters." >&2
-      continue
-    fi
-    printf 'repeat password (0 = back): ' >&2
-    stty -echo 2>/dev/null || true
-    IFS= read -r p2 || p2=""
-    stty echo 2>/dev/null || true
-    echo "" >&2
-    if wants_back "$p2"; then
-      return 1
-    fi
-    if [ "$p1" != "$p2" ]; then
-      echo "passwords do not match, try again." >&2
-      continue
-    fi
-    echo "$p1"
-    return
-  done
-}
 
 choose_port() {
   p=$(ask_default "8765" "port (0 = back)")
@@ -1495,9 +1727,12 @@ menu_start() {
     echo "the dashboard is not installed yet - install it first (menu 4)."
     return
   fi
+  if ! license_prepare; then
+    return
+  fi
   echo "how should the dashboard be reachable?"
   echo "  1) local only   (this computer, http://127.0.0.1)"
-  echo "  2) internet     (any device + this computer, protected by a password)"
+  echo "  2) internet     (any device + this computer, sign in with the license)"
   m=$(ask_default "1" "choose 1 or 2 (0 = back)")
   if wants_back "$m"; then
     echo "back to the main menu."
@@ -1505,14 +1740,8 @@ menu_start() {
   fi
   if [ "$m" = "2" ]; then
     bind="0.0.0.0"
-    if ! password=$(prompt_password); then
-      echo "back to the main menu."
-      return
-    fi
   else
     bind="127.0.0.1"
-    password=$(current_password || true)
-    [ -z "$password" ] && password=$(gen_password)
   fi
   if ! port=$(choose_port); then
     echo "back to the main menu."
@@ -1532,7 +1761,7 @@ menu_start() {
     fi
     stop_dashboard --force
   fi
-  start_dashboard "$bind" "$password" "$port"
+  start_dashboard "$bind" "$port"
 }
 
 menu_disk() {
@@ -1640,8 +1869,7 @@ menu_snapshot() {
       ;;
   esac
   bind=$(current_bind); [ -z "$bind" ] && bind="127.0.0.1"
-  password=$(current_password)
-  write_env_file "$bind" "$password" "$new"
+  write_env_file "$bind" "$new"
   if [ -n "$new" ]; then
     echo "saved: snapshot = $new"
   else
@@ -1658,8 +1886,12 @@ menu_snapshot() {
         echo "the dashboard was not restarted (menu 2 to start it later)."
         return
       fi
+      if ! license_prepare; then
+        echo "the dashboard was not restarted."
+        return
+      fi
       stop_dashboard --force
-      start_dashboard "$bind" "$password" "$port"
+      start_dashboard "$bind" "$port"
     fi
   fi
 }
@@ -1670,8 +1902,9 @@ menu_configure() {
     return
   fi
   echo "current bind: $(current_bind || echo 127.0.0.1)"
+  echo "sign-in is always the license username and password (menu 13)."
   echo "  1) local only"
-  echo "  2) internet (password required)"
+  echo "  2) internet (any device on your network / the internet)"
   m=$(ask_default "1" "choose 1 or 2 (0 = back)")
   if wants_back "$m"; then
     echo "back to the main menu."
@@ -1680,14 +1913,10 @@ menu_configure() {
   running=""
   [ -n "$(dashboard_pid)" ] && running=1
   if [ "$m" = "2" ]; then
-    if ! password=$(prompt_password); then
-      echo "back to the main menu."
-      return
-    fi
-    write_env_file "0.0.0.0" "$password"
-    echo "saved. access: user 'mapsim' / password '$password'"
+    write_env_file "0.0.0.0"
+    echo "saved: internet access on 0.0.0.0."
   else
-    write_env_file "127.0.0.1" "$(current_password || echo "$(gen_password)")"
+    write_env_file "127.0.0.1"
     echo "saved: local only."
   fi
   if [ -n "$running" ]; then
@@ -1701,8 +1930,12 @@ menu_configure() {
         echo "the dashboard was not restarted (menu 2 to start it later)."
         return
       fi
+      if ! license_prepare; then
+        echo "the dashboard was not restarted."
+        return
+      fi
       stop_dashboard --force
-      start_dashboard "$(current_bind)" "$(current_password)" "$port"
+      start_dashboard "$(current_bind)" "$port"
     fi
   fi
 }
@@ -1710,6 +1943,10 @@ menu_configure() {
 menu_service_install() {
   if ! is_installed; then
     echo "the dashboard is not installed yet - install it first (menu 4)."
+    return
+  fi
+  if ! license_prepare; then
+    echo "the service was not installed."
     return
   fi
   service_install
@@ -1776,6 +2013,10 @@ menu_service_action() {
     start|restart)
       if [ "$OS" = "Darwin" ] && ! service_enabled; then
         echo "the service is disabled - choose 6 to enable it first."
+        return
+      fi
+      if ! license_prepare; then
+        echo "the service was not $action-ed."
         return
       fi
       ;;
@@ -1945,12 +2186,20 @@ menu_main() {
       snap_plain="not found"
       snap_col="${RED}$snap_plain${NC}"
     fi
+    if license_saved; then
+      lic_plain="saved"
+      lic_col="${GREEN}$lic_plain${NC}"
+    else
+      lic_plain="not set"
+      lic_col="${RED}$lic_plain${NC}"
+    fi
 
     show_title
     ui_top
     ui_row "Dashboard" "$st_plain" "$st"
     ui_row "App" "$app_plain" "$app"
     ui_row "Expert" "$ea_plain" "$ea"
+    ui_row "License" "$lic_plain" "$lic_col"
     ui_row "Access" "$acc" "${CYAN}$acc${NC}"
     ui_row "URL" "$(access_url)"
     ui_row "Snapshot" "$snap_plain" "$snap_col"
@@ -1962,13 +2211,14 @@ menu_main() {
     ui_item "4" "Install / update dashboard"
     ui_item "5" "Service management (start/stop/restart/enable/disable)"
     ui_item "6" "Remove auto-start service"
-    ui_item "7" "Access mode / password"
+    ui_item "7" "Access mode (local / internet)"
     ui_item "8" "Uninstall everything"
     ui_item "9" "Expert Advisor: install / update"
     ui_item "10" "Expert Advisor: version check"
     ui_item "11" "Disk space / server storage"
     ui_item "12" "Snapshot file / data source"
-    ui_item "13" "Exit"
+    ui_item "13" "License (dashboard login)"
+    ui_item "14" "Exit"
     ui_bottom
     printf '%s\n' "${CYAN}tip: type 0 inside any option to return to this menu.${NC}"
     printf '\n%s' "${CYAN}Enter Number Of List:${NC} "
@@ -1990,8 +2240,9 @@ menu_main() {
       10) menu_ea_status ;;
       11) menu_disk ;;
       12) menu_snapshot ;;
-      13) echo "bye."; exit 0 ;;
-      *) msg_warn "please choose 1-13." ;;
+      13) menu_license ;;
+      14) echo "bye."; exit 0 ;;
+      *) msg_warn "please choose 1-14." ;;
     esac
     printf '%s' "${CYAN}Press Enter to continue...${NC}"
     IFS= read -r _ || { echo ""; exit 0; }
@@ -2027,31 +2278,34 @@ bootstrap() {
   fi
 
   if [ "$public" -eq 1 ]; then
-    if [ -n "${WANT_PASSWORD:-}" ]; then password="$WANT_PASSWORD";
-    elif [ -n "${MAPSIM_DASHBOARD_PASSWORD:-}" ]; then password="$MAPSIM_DASHBOARD_PASSWORD";
-    else password=$(gen_password); fi
-    write_env_file "0.0.0.0" "$password"
-    echo "public access:"
-    echo "  user     : mapsim"
-    echo "  password : $password"
-    echo "  saved in : $ENV_FILE"
+    write_env_file "0.0.0.0"
+    echo "public access: reachable from other devices on 0.0.0.0."
+    echo "  sign in with the license username and password (menu 13)."
   fi
 
   if [ "$service" -eq 1 ]; then
     service_install
     echo "service installed: starts automatically at boot/login."
+    if ! license_ready; then
+      echo "note: the dashboard needs a valid Mapsim license before it runs."
+      echo "      open $MENU_CMD and choose 13 (License)."
+    fi
   elif [ "$launch" -eq 1 ]; then
     if [ -z "$(dashboard_pid)" ]; then
       echo ""
-      echo "starting the dashboard (local mode) ..."
-      port=8765
-      if port_listening "$port" && ! dashboard_up "$port"; then
-        port=8766
-        echo "note: port 8765 is busy, using $port."
+      if ! license_ready; then
+        echo "the dashboard was not started: a valid Mapsim license is required."
+        echo "open the control center and choose 13 (License):  $MENU_CMD"
+      else
+        echo "starting the dashboard (local mode) ..."
+        port=8765
+        if port_listening "$port" && ! dashboard_up "$port"; then
+          port=8766
+          echo "note: port 8765 is busy, using $port."
+        fi
+        bind=$(current_bind); [ -z "$bind" ] && bind="127.0.0.1"
+        start_dashboard "$bind" "$port"
       fi
-      bind=$(current_bind); [ -z "$bind" ] && bind="127.0.0.1"
-      password=$(current_password); [ -z "$password" ] && password=$(gen_password)
-      start_dashboard "$bind" "$password" "$port"
     else
       echo "the dashboard is already running (pid $(dashboard_pid))."
     fi

@@ -10,7 +10,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.sh | sh
 #
 # Options (passed through to the control center):
-#   --public          allow remote access: bind 0.0.0.0 with a generated password
+#   --public          allow remote access: bind 0.0.0.0, sign in with the license
 #   --service         also install a background service that starts at boot/login
 #   --remove-service  stop and remove the background service (keeps the app)
 #   --uninstall       stop the app and the service, then remove everything

@@ -17,13 +17,12 @@ param(
   [switch]$Stop,
   [switch]$RemoveService,
   [switch]$Uninstall,
-  [string]$Version,
-  [string]$Password
+  [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
-$FallbackVersion = 'dashboard-v1.0.1'
+$FallbackVersion = 'dashboard-v1.0.2'
 $AppDir = Join-Path $env:LOCALAPPDATA 'MapsimDashboard'
 $Binary = Join-Path $AppDir 'MapsimDashboard.exe'
 $MenuPath = Join-Path $AppDir 'mapsim-menu.ps1'
@@ -36,6 +35,9 @@ $LogFile = Join-Path $ConfigDir 'dashboard.log'
 $LogMaxBytes = 262144
 $LogKeepLines = 200
 $TaskName = 'MapsimDashboard'
+$LicenseDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.mapsim'
+$LicenseFile = Join-Path $LicenseDir 'dashboard.license'
+$LicenseAuthFile = Join-Path $LicenseDir 'dashboard.auth'
 
 function Test-Installed { Test-Path $Binary }
 
@@ -55,23 +57,211 @@ function Get-CurrentPort {
   return 8765
 }
 
-function Get-CurrentPassword {
-  if (Test-Path $EnvFile) {
-    $line = Get-Content $EnvFile | Where-Object { $_ -match '^MAPSIM_DASHBOARD_PASSWORD=' } | Select-Object -Last 1
-    if ($line) { return $line -replace '^MAPSIM_DASHBOARD_PASSWORD=', '' }
-  }
+function Write-EnvFile([string]$Bind) {
+  New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+  @("MAPSIM_DASHBOARD_BIND=$Bind") | Set-Content $EnvFile -Encoding ASCII
+}
+
+# ---------------------------------------------------------------- license
+
+function Test-LicenseSaved {
+  if (-not (Test-Path $LicenseFile)) { return $false }
+  if (-not (Test-Path $LicenseAuthFile)) { return $false }
+  return ((Get-Item $LicenseFile).Length -gt 0) -and ((Get-Item $LicenseAuthFile).Length -gt 0)
+}
+
+function Get-LicenseField([string]$Text, [string]$Key) {
+  if (-not $Text) { return '' }
+  $line = ($Text -split "`r?`n") | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1
+  if ($line) { return $line.Substring($Key.Length + 1) }
   return ''
 }
 
-function Write-EnvFile([string]$Bind, [string]$Pwd) {
-  New-Item -ItemType Directory -Force $ConfigDir | Out-Null
-  @("MAPSIM_DASHBOARD_BIND=$Bind", "MAPSIM_DASHBOARD_PASSWORD=$Pwd") | Set-Content $EnvFile -Encoding ASCII
+# Quotes a value so Start-Process passes paths with spaces intact.
+function Quote-Arg([string]$Value) {
+  if ($Value -match '[\s"]') { return '"' + ($Value -replace '"', '\"') + '"' }
+  return $Value
 }
 
-function New-RandomPassword {
-  $bytes = New-Object byte[] 16
-  [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-  ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+# The dashboard is a windowed app: it has no console, so the result comes back
+# in a file (--license-out) instead of stdout.
+function Invoke-LicenseCheck([string]$LicensePath, [string]$AuthPath) {
+  $out = [IO.Path]::GetTempFileName()
+  try {
+    $cliArgs = @(
+      '--license-check',
+      '--license-file', (Quote-Arg $LicensePath),
+      '--auth-file', (Quote-Arg $AuthPath),
+      '--no-browser',
+      '--license-out', (Quote-Arg $out)
+    ) -join ' '
+    Start-Process -FilePath $Binary -ArgumentList $cliArgs -Wait -WindowStyle Hidden | Out-Null
+    if (Test-Path $out) { return (Get-Content $out -Raw -ErrorAction SilentlyContinue) }
+    return ''
+  } finally {
+    Remove-Item $out -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Test-LicenseSupported {
+  if (-not (Test-Path $Binary)) { return $false }
+  $text = Invoke-LicenseCheck 'C:\mapsim-nonexistent.license' 'C:\mapsim-nonexistent.auth'
+  return [bool]($text -match '(?m)^status=')
+}
+
+function Show-LicenseResult([string]$Text) {
+  $user = Get-LicenseField $Text 'user'
+  $account = Get-LicenseField $Text 'account'
+  $expiry = Get-LicenseField $Text 'expiry'
+  $days = Get-LicenseField $Text 'days_left'
+  $status = Get-LicenseField $Text 'status'
+  $message = Get-LicenseField $Text 'message'
+  $warning = Get-LicenseField $Text 'warning'
+  if ($user) { Write-Host "  user    : $user" }
+  if ($account) { Write-Host "  account : $account" }
+  if ($expiry) { Write-Host "  expires : $expiry ($days day(s) left)" }
+  if ($message) { Write-Host "  status  : $status - $message" }
+  if ($warning) { Write-Host "  warning : $warning" }
+}
+
+function Test-LicenseReady {
+  if (-not (Test-LicenseSupported)) { return $false }
+  if (-not (Test-LicenseSaved)) { return $false }
+  $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
+  return ((Get-LicenseField $text 'status') -eq 'ACTIVE')
+}
+
+# Interactive gate for anything that starts the dashboard.
+function Confirm-License {
+  if (-not (Test-LicenseSupported)) {
+    Write-Host 'the installed dashboard build does not support the license yet.'
+    Write-Host 'update it from menu 4 (Install / update dashboard), then enter the license (menu 12).'
+    return $false
+  }
+  if (-not (Test-LicenseSaved)) {
+    Write-Host 'a valid Mapsim license is required to run the dashboard.'
+    $a = Read-Default 'enter the license now? (y/n)' 'y'
+    if ($a -ne 'y') {
+      Write-Host 'the dashboard was not started - the license is required (menu 12).'
+      return $false
+    }
+    if (-not (Enter-License)) { return $false }
+  }
+  $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
+  if ((Get-LicenseField $text 'status') -ne 'ACTIVE') {
+    Write-Host 'the license check failed:'
+    Show-LicenseResult $text
+    Write-Host 'the dashboard was not started. Fix the license in menu 12.'
+    return $false
+  }
+  $warning = Get-LicenseField $text 'warning'
+  if ($warning) { Write-Host "warning: $warning" }
+  return $true
+}
+
+function Enter-License {
+  if (-not (Test-LicenseSupported)) {
+    Write-Host 'the installed dashboard build does not support the license yet.'
+    Write-Host 'update it from menu 4 (Install / update dashboard), then try again.'
+    return $false
+  }
+  $lic = Read-Host 'paste your license (0 = back)'
+  if ($lic -eq '0') { Write-Host 'back.'; return $false }
+  if ([string]::IsNullOrWhiteSpace($lic)) { Write-Host 'no license entered.'; return $false }
+  $user = Read-Host 'license username (0 = back)'
+  if ($user -eq '0') { Write-Host 'back.'; return $false }
+  $secure = Read-Host 'license password (0 = back)' -AsSecureString
+  $pass = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+  if ($pass -eq '0') { Write-Host 'back.'; return $false }
+  if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
+    Write-Host 'the username and password must not be empty.'
+    return $false
+  }
+
+  New-Item -ItemType Directory -Force $LicenseDir | Out-Null
+  $tmpLic = Join-Path $LicenseDir 'dashboard.license.tmp'
+  $tmpAuth = Join-Path $LicenseDir 'dashboard.auth.tmp'
+  try {
+    Set-Content -Path $tmpLic -Value $lic -Encoding ASCII
+    Set-Content -Path $tmpAuth -Value @($user, $pass) -Encoding ASCII
+    $text = Invoke-LicenseCheck $tmpLic $tmpAuth
+  } finally {
+    Remove-Item $tmpLic, $tmpAuth -Force -ErrorAction SilentlyContinue
+  }
+  if ((Get-LicenseField $text 'status') -ne 'ACTIVE') {
+    Write-Host 'this license was rejected:'
+    Show-LicenseResult $text
+    Write-Host 'nothing was saved.'
+    return $false
+  }
+  Set-Content -Path $LicenseFile -Value $lic -Encoding ASCII
+  Set-Content -Path $LicenseAuthFile -Value @($user, $pass) -Encoding ASCII
+  # The password file must stay private to this Windows account.
+  $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  & icacls $LicenseFile '/inheritance:r' '/grant:r' "${me}:(R,W)" | Out-Null
+  & icacls $LicenseAuthFile '/inheritance:r' '/grant:r' "${me}:(R,W)" | Out-Null
+  Write-Host 'license saved:'
+  Show-LicenseResult $text
+  $days = Get-LicenseField $text 'days_left'
+  if ($days -match '^\d+$' -and [int]$days -le 7) {
+    Write-Host "warning: this license expires in $days day(s) - renew it soon."
+  }
+  return $true
+}
+
+function Show-LicenseStatus {
+  if (-not (Test-LicenseSupported)) {
+    Write-Host 'the installed dashboard build does not support the license yet.'
+    Write-Host 'update it from menu 4 (Install / update dashboard).'
+    return
+  }
+  if (-not (Test-LicenseSaved)) {
+    Write-Host 'license : not set (choose 1 to enter it)'
+    return
+  }
+  Write-Host 'license files:'
+  Write-Host "  $LicenseFile"
+  Write-Host "  $LicenseAuthFile"
+  $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
+  Show-LicenseResult $text
+  if ((Get-LicenseField $text 'status') -eq 'ACTIVE') { Write-Host 'license : ACTIVE' }
+  else { Write-Host 'license : NOT ACTIVE - the dashboard will not start (choose 1 to fix it)' }
+}
+
+function Remove-License {
+  if (-not (Test-LicenseSaved)) { Write-Host 'no license is saved.'; return }
+  $a = Read-Default 'remove the saved license? the dashboard will not start without it (y/n)' 'n'
+  if ($a -ne 'y') { Write-Host 'cancelled.'; return }
+  Remove-Item $LicenseFile, $LicenseAuthFile -Force -ErrorAction SilentlyContinue
+  if ((Test-Path $LicenseDir) -and -not (Get-ChildItem $LicenseDir -Force -ErrorAction SilentlyContinue)) {
+    Remove-Item $LicenseDir -Force -ErrorAction SilentlyContinue
+  }
+  Write-Host 'license removed.'
+}
+
+function Show-LicenseMenu {
+  while ($true) {
+    Clear-Host
+    Show-Title
+    Write-Host 'License'
+    Write-Host '  dashboard login uses the license username/password'
+    if (Test-LicenseSaved) { Write-Host "  saved: yes ($LicenseFile)" } else { Write-Host '  saved: no' }
+    Write-Host ''
+    Write-Host '  1) Enter / update license'
+    Write-Host '  2) Show license status'
+    Write-Host '  3) Remove saved license'
+    Write-Host '  0) Back to the main menu'
+    $c = Read-Host "`nchoose 1-3 (0 = back)"
+    switch ($c) {
+      '0' { return }
+      '1' { Enter-License | Out-Null }
+      '2' { Show-LicenseStatus }
+      '3' { Remove-License }
+      default { Write-Host 'please choose 1-3.' }
+    }
+    $null = Read-Host "`nPress Enter to continue"
+  }
 }
 
 function Get-DashboardPids {
@@ -274,9 +464,14 @@ function Stop-Dashboard {
   Trim-Logs
 }
 
-function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
+function Start-Dashboard([string]$Bind, [int]$Port) {
   if (Get-DashboardPid) {
     Write-Host "the dashboard is already running (pid $(Get-DashboardPid))."
+    return
+  }
+  if (-not (Test-LicenseReady)) {
+    Write-Host 'error: a valid Mapsim license is required - the dashboard was not started.' -ForegroundColor Red
+    Write-Host 'open menu 12 (License) and enter or fix the license.'
     return
   }
   if (Test-ServiceInstalled) {
@@ -291,9 +486,8 @@ function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
     Write-Host "error: port $Port is already used by another program." -ForegroundColor Red
     return
   }
-  Write-EnvFile $Bind $Pwd
+  Write-EnvFile $Bind
   $env:MAPSIM_DASHBOARD_BIND = $Bind
-  $env:MAPSIM_DASHBOARD_PASSWORD = $Pwd
   New-Item -ItemType Directory -Force $ConfigDir | Out-Null
   Trim-Logs
   $proc = Start-Process -FilePath $Binary -ArgumentList '--no-browser', "--port", "$Port" -WorkingDirectory $AppDir -WindowStyle Hidden -RedirectStandardOutput $LogFile -RedirectStandardError "$LogFile.err" -PassThru
@@ -305,7 +499,7 @@ function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
       Write-Host "  local   : http://127.0.0.1:$Port/"
       if ($Bind -eq '0.0.0.0') {
         Write-Host "  remote  : http://<this-pc-ip>:$Port/ (open the port in Windows Firewall)"
-        Write-Host "  access  : user 'mapsim' / password '$Pwd'"
+        Write-Host '  access  : the license username and password (menu 12)'
       }
       return
     }
@@ -355,6 +549,18 @@ function Show-Status {
   elseif (Test-PortListening $port) { Write-Host "port $port : busy (another program)" }
   else { Write-Host "port $port : free" }
   Write-Host "bind      : $(Get-CurrentBind)"
+  if (-not (Test-LicenseSaved)) {
+    Write-Host 'license   : not set (menu 12 - required to start)'
+  } elseif (-not (Test-LicenseSupported)) {
+    Write-Host 'license   : saved (the installed build is too old - menu 4)'
+  } else {
+    $lic = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
+    $lstatus = Get-LicenseField $lic 'status'
+    $luser = Get-LicenseField $lic 'user'
+    $lexp = Get-LicenseField $lic 'expiry'
+    if ($lstatus -eq 'ACTIVE') { Write-Host "license   : ACTIVE - $luser, expires $lexp" }
+    else { Write-Host "license   : $lstatus ($(Get-LicenseField $lic 'message')) - dashboard will not start" }
+  }
   $sysDrive = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':'))
   if ($null -ne $sysDrive.Used -and ($sysDrive.Used + $sysDrive.Free) -gt 0) {
     Write-Host ("disk      : {0} GB free of {1} GB ({2}% used)" -f [math]::Round($sysDrive.Free / 1GB, 1), [math]::Round(($sysDrive.Used + $sysDrive.Free) / 1GB, 1), [math]::Round($sysDrive.Used / ($sysDrive.Used + $sysDrive.Free) * 100))
@@ -375,24 +581,6 @@ function Read-Default([string]$Prompt, [string]$Default) {
   $a = Read-Host "$Prompt [$Default]"
   if ([string]::IsNullOrWhiteSpace($a)) { return $Default }
   return $a
-}
-
-function Read-Password {
-  $existing = Get-CurrentPassword
-  while ($true) {
-    if ($existing) { $p1 = Read-Host 'password (press Enter to keep the current one)' }
-    else { $p1 = Read-Host 'password (min 8 characters)' }
-    if ([string]::IsNullOrWhiteSpace($p1) -and $existing) { return $existing }
-    if ([string]::IsNullOrWhiteSpace($p1)) {
-      $generated = New-RandomPassword
-      Write-Host "generated password: $generated"
-      return $generated
-    }
-    if ($p1.Length -lt 8) { Write-Host 'too short - at least 8 characters.'; continue }
-    $p2 = Read-Host 'repeat password'
-    if ($p1 -ne $p2) { Write-Host 'passwords do not match, try again.'; continue }
-    return $p1
-  }
 }
 
 # ---------------------------------------------------------------- ui (colors, boxes, title)
@@ -484,6 +672,9 @@ function Invoke-ServiceAction([string]$Action) {
   if (-not (Test-Installed)) { Write-Host 'the dashboard is not installed yet - use menu 4.'; return }
   if (-not (Test-ServiceInstalled)) { Write-Host 'the auto-start task is not installed - choose 2 first.'; return }
   $port = Get-CurrentPort
+  if ($Action -in @('start', 'restart')) {
+    if (-not (Confirm-License)) { Write-Host "the dashboard was not $Action-ed."; return }
+  }
   switch ($Action) {
     'start' {
       Start-ServiceTask
@@ -543,6 +734,7 @@ function Show-ServiceMenu {
       '1' { Show-ServiceStatus }
       '2' {
         if (Test-Installed) {
+          if (-not (Confirm-License)) { Write-Host 'the task was not installed.'; $null = Read-Host "`nPress Enter to continue"; continue }
           Install-Service
           Write-Host 'task installed and enabled: the dashboard starts now and at every logon.'
         } else { Write-Host 'not installed yet - use menu 4.' }
@@ -589,6 +781,9 @@ function Show-Menu {
     Ui-Row 'Dashboard' $stPlain $stCol
     Ui-Row 'App' $appPlain $appCol
     Ui-Row 'Expert' $eaPlain $eaCol
+    if (Test-LicenseSaved) { $licPlain = 'saved'; $licCol = $Green + $licPlain + $NoColor }
+    else { $licPlain = 'not set'; $licCol = $Red + $licPlain + $NoColor }
+    Ui-Row 'License' $licPlain $licCol
     Ui-Row 'Access' $acc ($Cyan + $acc + $NoColor)
     Ui-Row 'Disk' $diskLine ($diskCol + $diskLine + $NoColor)
     Ui-Sep
@@ -598,30 +793,26 @@ function Show-Menu {
     Ui-Item '4' 'Install / update dashboard'
     Ui-Item '5' 'Service management (start/stop/restart/enable/disable)'
     Ui-Item '6' 'Remove auto-start service'
-    Ui-Item '7' 'Access mode / password'
+    Ui-Item '7' 'Access mode (local / internet)'
     Ui-Item '8' 'Uninstall everything'
     Ui-Item '9' 'Expert Advisor: install / update'
     Ui-Item '10' 'Expert Advisor: version check'
     Ui-Item '11' 'Disk space / server storage'
-    Ui-Item '12' 'Exit'
+    Ui-Item '12' 'License (dashboard login)'
+    Ui-Item '13' 'Exit'
     Ui-Bottom
     $c = Read-Host "`nEnter Number Of List"
     switch ($c) {
       '1' { Show-Status }
       '2' {
         if (-not (Test-Installed)) { Write-Host 'not installed yet - use menu 4.'; continue }
+        if (-not (Confirm-License)) { continue }
         Write-Host 'how should the dashboard be reachable?'
         Write-Host '  1) local only   (this computer, http://127.0.0.1)'
-        Write-Host '  2) internet     (any device + this computer, protected by a password)'
+        Write-Host '  2) internet     (any device + this computer, sign in with the license)'
         $m = Read-Default 'choose 1 or 2' '1'
-        if ($m -eq '2') {
-          $bind = '0.0.0.0'
-          $pwd = Read-Password
-        } else {
-          $bind = '127.0.0.1'
-          $pwd = Get-CurrentPassword
-          if (-not $pwd) { $pwd = New-RandomPassword }
-        }
+        if ($m -eq '2') { $bind = '0.0.0.0' } else { $bind = '127.0.0.1' }
+        $port = Choose-Port
         $oldId = Get-DashboardPid
         if ($oldId) {
           Write-Host "the dashboard is already running (pid $oldId, port $(Get-CurrentPort), bind $(Get-CurrentBind))."
@@ -629,8 +820,7 @@ function Show-Menu {
           if ($a -ne 'y') { Write-Host 'cancelled - the running dashboard was not changed.'; continue }
           Stop-Dashboard
         }
-        $port = Choose-Port
-        Start-Dashboard $bind $pwd $port
+        Start-Dashboard $bind $port
       }
       '3' { Stop-Dashboard }
       '4' { Install-Dashboard }
@@ -643,25 +833,20 @@ function Show-Menu {
       '7' {
         if (-not (Test-Installed)) { Write-Host 'not installed yet - use menu 4.'; continue }
         Write-Host "current bind: $(Get-CurrentBind)"
+        Write-Host 'sign-in is always the license username and password (menu 12).'
         Write-Host '  1) local only'
-        Write-Host '  2) internet (password required)'
+        Write-Host '  2) internet (any device on your network / the internet)'
         $m = Read-Default 'choose 1 or 2' '1'
         $wasRunning = [bool](Get-DashboardPid)
-        if ($m -eq '2') {
-          $pwd = Read-Password
-          Write-EnvFile '0.0.0.0' $pwd
-          Write-Host "saved. access: user 'mapsim' / password '$pwd'"
-        } else {
-          if (-not (Get-CurrentPassword)) { Write-EnvFile '127.0.0.1' (New-RandomPassword) }
-          else { Write-EnvFile '127.0.0.1' (Get-CurrentPassword) }
-          Write-Host 'saved: local only.'
-        }
+        if ($m -eq '2') { Write-EnvFile '0.0.0.0'; Write-Host 'saved: internet access on 0.0.0.0.' }
+        else { Write-EnvFile '127.0.0.1'; Write-Host 'saved: local only.' }
         if ($wasRunning) {
           $a = Read-Default 'restart the dashboard now? (y/n)' 'y'
           if ($a -eq 'y') {
-            Stop-Dashboard
             $port = Choose-Port
-            Start-Dashboard (Get-CurrentBind) (Get-CurrentPassword) $port
+            if (-not (Confirm-License)) { Write-Host 'the dashboard was not restarted.'; continue }
+            Stop-Dashboard
+            Start-Dashboard (Get-CurrentBind) $port
           }
         }
       }
@@ -683,8 +868,9 @@ function Show-Menu {
       }
       '10' { Show-EaStatus }
       '11' { Show-Disk }
-      '12' { Write-Host 'bye.'; return }
-      default { Write-Host 'please choose 1-12.' }
+      '12' { Show-LicenseMenu }
+      '13' { Write-Host 'bye.'; return }
+      default { Write-Host 'please choose 1-13.' }
     }
     $null = Read-Host "`nPress Enter to continue"
   }
@@ -829,6 +1015,7 @@ function Uninstall-Everything {
   Stop-Dashboard | Out-Null
   if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
   if (Test-Path $ConfigDir) { Remove-Item -Recurse -Force $ConfigDir }
+  if (Test-Path $LicenseDir) { Remove-Item -Recurse -Force $LicenseDir }
   $desktop = [Environment]::GetFolderPath('Desktop')
   Remove-Item (Join-Path $desktop 'Mapsim BOT.lnk') -ErrorAction SilentlyContinue
   Remove-Item (Join-Path $desktop 'MapsimDashboard.lnk') -ErrorAction SilentlyContinue
@@ -847,14 +1034,9 @@ if ($Bootstrap) {
   if (-not (Test-Installed)) { Install-Dashboard }
   else { Install-Self; Write-Shim }
   if ($Public) {
-    $pwd = $Password
-    if (-not $pwd) { $pwd = $env:MAPSIM_DASHBOARD_PASSWORD }
-    if (-not $pwd) { $pwd = New-RandomPassword }
-    Write-EnvFile '0.0.0.0' $pwd
-    Write-Host 'public access:'
-    Write-Host "  user     : mapsim"
-    Write-Host "  password : $pwd"
-    Write-Host "  saved in : $EnvFile"
+    Write-EnvFile '0.0.0.0'
+    Write-Host 'public access: reachable from other devices on 0.0.0.0.'
+    Write-Host '  sign in with the license username and password (menu 12).'
     try {
       New-NetFirewallRule -DisplayName 'Mapsim Dashboard' -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -ErrorAction Stop | Out-Null
       Write-Host 'firewall  : inbound rule for port 8765 added'
@@ -865,18 +1047,25 @@ if ($Bootstrap) {
   if ($Service) {
     Install-Service
     Write-Host 'task installed and enabled: the dashboard starts now and at every logon.'
+    if (-not (Test-LicenseReady)) {
+      Write-Host 'note: the dashboard needs a valid Mapsim license before it runs.'
+      Write-Host '      open Mapsim_BOT and choose 12 (License).'
+    }
   } elseif (-not $NoLaunch) {
     if (-not (Get-DashboardPid)) {
       Write-Host ''
-      Write-Host 'starting the dashboard (local mode) ...'
-      $port = 8765
-      if ((Test-PortListening $port) -and -not (Test-DashboardUp $port)) {
-        $port = 8766
-        Write-Host "note: port 8765 is busy, using $port."
+      if (-not (Test-LicenseReady)) {
+        Write-Host 'the dashboard was not started: a valid Mapsim license is required.'
+        Write-Host 'open Mapsim_BOT and choose 12 (License).'
+      } else {
+        Write-Host 'starting the dashboard (local mode) ...'
+        $port = 8765
+        if ((Test-PortListening $port) -and -not (Test-DashboardUp $port)) {
+          $port = 8766
+          Write-Host "note: port 8765 is busy, using $port."
+        }
+        Start-Dashboard (Get-CurrentBind) $port
       }
-      $pwd = Get-CurrentPassword
-      if (-not $pwd) { $pwd = New-RandomPassword }
-      Start-Dashboard (Get-CurrentBind) $pwd $port
     } else {
       Write-Host "the dashboard is already running (pid $(Get-DashboardPid))."
     }

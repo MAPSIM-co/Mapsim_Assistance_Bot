@@ -84,6 +84,40 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-build.txt
 
+      - name: Create a short-lived smoke-test license
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import secrets
+          import sys
+          from datetime import datetime, timedelta
+          from pathlib import Path
+
+          sys.path.insert(0, os.environ["SOURCE_DIR"])
+          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+          import license_gate
+
+          user = "cismoke"  # license fields are split on '-', so no hyphen here
+          password = secrets.token_hex(8)
+          expiry = datetime.now() + timedelta(days=2)
+          plain = (
+              f"{user}-{password}-{expiry.year}-{expiry.month:02d}-{expiry.day:02d}"
+              f"-{expiry.hour:02d}-{expiry.minute:02d}-{license_gate.ACTIVE_CODE}-000000"
+          )
+          raw = plain.encode("utf-8")
+          raw += b"\x00" * ((-len(raw)) % 16)
+          encryptor = Cipher(algorithms.AES(license_gate.AES_KEY), modes.ECB()).encryptor()
+          text = (encryptor.update(raw) + encryptor.finalize()).hex()
+
+          folder = Path(".smoke")
+          folder.mkdir(exist_ok=True)
+          (folder / "license").write_text(text + "\n", encoding="utf-8")
+          (folder / "auth").write_text(f"{user}\n{password}\n", encoding="utf-8")
+          print("smoke-test license created (expires in 2 days)")
+          PY
+
       - name: Detect signing credentials
         id: signing
         shell: bash
@@ -167,7 +201,12 @@ jobs:
             Windows) artifact="dist/MapsimDashboard.exe" ;;
             *) artifact="dist/MapsimDashboard" ;;
           esac
-          python smoke_test.py --artifact "$artifact"
+          python smoke_test.py --artifact "$artifact" --license-file .smoke/license --auth-file .smoke/auth
+
+      - name: Remove the smoke-test license
+        if: always()
+        shell: bash
+        run: rm -rf .smoke
 
       - name: Package macOS artifact
         if: runner.os == 'macOS'
