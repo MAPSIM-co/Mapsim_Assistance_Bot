@@ -61,12 +61,34 @@ needed and does everything else by itself (port checks, passwords, service
 setup):
 
 ```
-=== Mapsim BOT control center ===
-dashboard: stopped   app: installed
+     ██   ██  █████  ██████   ██████ ███████ ██   ██   █████   █████  ███████
+     ███ ███ ██   ██ ██   ██ ██      ██      ███ ███  ██   ██ ██   ██   ███
+     ██ █ ██ ███████ ██████   █████  ███████ ██ █ ██  ██████  ██   ██   ███
+     ██   ██ ██   ██ ██           ██ ██      ██   ██  ██   ██ ██   ██   ███
+     ██   ██ ██   ██ ██      ██████  ███████ ██   ██  ██████   █████    ███
 
-  1) Status                        - installed? running? ports? service?
+┌───────────────────────────────────────────────────────────────────────────────┐
+│  Dashboard : running (pid 4242)                                               │
+│  App       : installed                                                        │
+│  Expert    : v213.1.6                                                         │
+│  Access    : internet (0.0.0.0) - port 8766                                   │
+│  Disk      : 42.3 GB free of 80 GB (47% used)                                 │
+├───────────────────────────────────────────────────────────────────────────────┤
+│    1 - Status                                                                 │
+│    2 - Start dashboard                                                        │
+│  ...                                                                          │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+The panel always shows whether the dashboard is running, the installed Expert
+version, the access mode/port and free disk space (green below 75% used, yellow
+75–89%, red 90% or more).
+
+  1) Status                        - installed? running? which port? service? disk?
   2) Start dashboard               - asks: local only or internet, checks ports,
-                                     asks for a password in internet mode
+                                     asks for a password in internet mode; if the
+                                     dashboard is already running it offers to
+                                     stop it and restart with the new settings
   3) Stop dashboard                - stops only this dashboard, frees the port
   4) Install / update dashboard    - downloads the newest release, checksum-checked
   5) Enable auto-start service     - starts at boot/login (systemd / LaunchAgent /
@@ -79,8 +101,9 @@ dashboard: stopped   app: installed
                                      Include, Libraries, Sounds) into the detected
                                      MetaTrader 5 MQL5 folder(s)
  10) Expert Advisor: version check - shows installed vs latest, offers the update
- 11) Exit
-```
+ 11) Disk space / server storage   - all filesystems, dashboard folder sizes,
+                                     free space and the dashboard log size
+ 12) Exit
 
 ### Expert Advisor management
 

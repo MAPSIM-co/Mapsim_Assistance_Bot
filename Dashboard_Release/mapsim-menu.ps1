@@ -31,6 +31,7 @@ $ShimPath = Join-Path $AppDir 'Mapsim_BOT.cmd'
 $ConfigDir = Join-Path $env:APPDATA 'MapsimDashboard'
 $EnvFile = Join-Path $ConfigDir 'dashboard-access.env'
 $PidFile = Join-Path $ConfigDir 'dashboard.pid'
+$PortFile = Join-Path $ConfigDir 'dashboard.port'
 $LogFile = Join-Path $ConfigDir 'dashboard.log'
 $TaskName = 'MapsimDashboard'
 
@@ -42,6 +43,14 @@ function Get-CurrentBind {
     if ($line) { return $line -replace '^MAPSIM_DASHBOARD_BIND=', '' }
   }
   return '127.0.0.1'
+}
+
+function Get-CurrentPort {
+  if (Test-Path $PortFile) {
+    $p = (Get-Content $PortFile | Select-Object -Last 1).Trim()
+    if ($p -match '^\d+$') { return [int]$p }
+  }
+  return 8765
 }
 
 function Get-CurrentPassword {
@@ -193,6 +202,7 @@ function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
   Set-Content $PidFile $proc.Id
   for ($i = 0; $i -lt 20; $i++) {
     if ((Get-DashboardPid) -and (Test-DashboardUp $Port)) {
+      Set-Content $PortFile $Port -Encoding ASCII
       Write-Host 'dashboard is up:'
       Write-Host "  local   : http://127.0.0.1:$Port/"
       if ($Bind -eq '0.0.0.0') {
@@ -206,15 +216,43 @@ function Start-Dashboard([string]$Bind, [string]$Pwd, [int]$Port) {
   Write-Host "error: the dashboard did not answer on port $Port; see $LogFile" -ForegroundColor Red
 }
 
+function Show-Disk {
+  Write-Host 'disk space:'
+  Get-PSDrive -PSProvider FileSystem | ForEach-Object {
+    if ($null -ne $_.Used -and ($_.Used + $_.Free) -gt 0) {
+      $total = [math]::Round(($_.Used + $_.Free) / 1GB, 1)
+      $free = [math]::Round($_.Free / 1GB, 1)
+      $pct = [math]::Round($_.Used / ($_.Used + $_.Free) * 100)
+      Write-Host ("  {0,-3} {1,8} GB free of {2,8} GB  ({3}% used)  {4}" -f $_.Name, $free, $total, $pct, $_.Root)
+    }
+  }
+  Write-Host ''
+  Write-Host 'dashboard folders:'
+  foreach ($d in @($AppDir, $ConfigDir)) {
+    if (Test-Path $d) {
+      $size = (Get-ChildItem $d -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+      $mb = [math]::Round([double]$size / 1MB, 1)
+      Write-Host ("  {0} MB  {1}" -f $mb, $d)
+    }
+  }
+  Write-Host ''
+  Write-Host 'hint: free up space by removing old dashboard logs or an unused MT5 copy.'
+}
+
 function Show-Status {
   Write-Host "system    : Windows x64"
   if (Test-Installed) { Write-Host "app       : installed ($AppDir)" } else { Write-Host 'app       : not installed' }
   $id = Get-DashboardPid
   if ($id) { Write-Host "dashboard : RUNNING (pid $id)" } else { Write-Host 'dashboard : stopped' }
-  if (Test-DashboardUp 8765) { Write-Host "port 8765 : dashboard answering (HTTP $(Get-HttpCode 8765))" }
-  elseif (Test-PortListening 8765) { Write-Host 'port 8765 : busy (another program)' }
-  else { Write-Host 'port 8765 : free' }
+  $port = Get-CurrentPort
+  if (Test-DashboardUp $port) { Write-Host "port $port : dashboard answering (HTTP $(Get-HttpCode $port))" }
+  elseif (Test-PortListening $port) { Write-Host "port $port : busy (another program)" }
+  else { Write-Host "port $port : free" }
   Write-Host "bind      : $(Get-CurrentBind)"
+  $sysDrive = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':'))
+  if ($null -ne $sysDrive.Used -and ($sysDrive.Used + $sysDrive.Free) -gt 0) {
+    Write-Host ("disk      : {0} GB free of {1} GB ({2}% used)" -f [math]::Round($sysDrive.Free / 1GB, 1), [math]::Round(($sysDrive.Used + $sysDrive.Free) / 1GB, 1), [math]::Round($sysDrive.Used / ($sysDrive.Used + $sysDrive.Free) * 100))
+  }
   if (Test-ServiceInstalled) { Write-Host 'service   : installed (auto-start at logon)' } else { Write-Host 'service   : not installed' }
 }
 
@@ -310,8 +348,20 @@ function Show-Menu {
     $ea = Get-EaInstalledVersion
     if ($ea) { $eaPlain = $ea; $eaCol = $Green + $ea + $NoColor }
     else { $eaPlain = 'not installed'; $eaCol = $Yellow + $eaPlain + $NoColor }
-    if ((Get-CurrentBind) -eq '0.0.0.0') { $acc = 'internet (password required)' }
-    else { $acc = 'local only (this computer)' }
+    $bindNow = Get-CurrentBind
+    $portNow = Get-CurrentPort
+    if ($bindNow -eq '0.0.0.0') { $acc = "internet (0.0.0.0) - port $portNow" }
+    else { $acc = "local only - port $portNow" }
+    $sysDrive = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':'))
+    if ($null -ne $sysDrive.Used -and ($sysDrive.Used + $sysDrive.Free) -gt 0) {
+      $totalGB = ($sysDrive.Used + $sysDrive.Free)
+      $usedPct = [math]::Round($sysDrive.Used / $totalGB * 100)
+      $diskLine = '{0} GB free of {1} GB ({2}% used)' -f [math]::Round($sysDrive.Free / 1GB, 1), [math]::Round($totalGB / 1GB, 1), $usedPct
+      if ($usedPct -ge 90) { $diskCol = $Red } elseif ($usedPct -ge 75) { $diskCol = $Yellow } else { $diskCol = $Green }
+    } else {
+      $diskLine = 'unknown'
+      $diskCol = $Yellow
+    }
 
     Show-Title
     Ui-Top
@@ -319,6 +369,7 @@ function Show-Menu {
     Ui-Row 'App' $appPlain $appCol
     Ui-Row 'Expert' $eaPlain $eaCol
     Ui-Row 'Access' $acc ($Cyan + $acc + $NoColor)
+    Ui-Row 'Disk' $diskLine ($diskCol + $diskLine + $NoColor)
     Ui-Sep
     Ui-Item '1' 'Status'
     Ui-Item '2' 'Start dashboard'
@@ -330,7 +381,8 @@ function Show-Menu {
     Ui-Item '8' 'Uninstall everything'
     Ui-Item '9' 'Expert Advisor: install / update'
     Ui-Item '10' 'Expert Advisor: version check'
-    Ui-Item '11' 'Exit'
+    Ui-Item '11' 'Disk space / server storage'
+    Ui-Item '12' 'Exit'
     Ui-Bottom
     $c = Read-Host "`nEnter Number Of List"
     switch ($c) {
@@ -339,15 +391,25 @@ function Show-Menu {
         if (-not (Test-Installed)) { Write-Host 'not installed yet - use menu 4.'; continue }
         Write-Host 'how should the dashboard be reachable?'
         Write-Host '  1) local only   (this computer, http://127.0.0.1)'
-        Write-Host '  2) internet     (any device, protected by a password)'
+        Write-Host '  2) internet     (any device + this computer, protected by a password)'
         $m = Read-Default 'choose 1 or 2' '1'
-        $port = Choose-Port
         if ($m -eq '2') {
+          $bind = '0.0.0.0'
           $pwd = Read-Password
-          Start-Dashboard '0.0.0.0' $pwd $port
         } else {
-          Start-Dashboard '127.0.0.1' (Get-CurrentPassword) $port
+          $bind = '127.0.0.1'
+          $pwd = Get-CurrentPassword
+          if (-not $pwd) { $pwd = New-RandomPassword }
         }
+        $oldId = Get-DashboardPid
+        if ($oldId) {
+          Write-Host "the dashboard is already running (pid $oldId, port $(Get-CurrentPort), bind $(Get-CurrentBind))."
+          $a = Read-Default 'stop it and restart with the new settings? (y/n)' 'y'
+          if ($a -ne 'y') { Write-Host 'cancelled - the running dashboard was not changed.'; continue }
+          Stop-Dashboard
+        }
+        $port = Choose-Port
+        Start-Dashboard $bind $pwd $port
       }
       '3' { Stop-Dashboard }
       '4' { Install-Dashboard }
@@ -403,8 +465,9 @@ function Show-Menu {
         Install-Ea $latest
       }
       '10' { Show-EaStatus }
-      '11' { Write-Host 'bye.'; return }
-      default { Write-Host 'please choose 1-11.' }
+      '11' { Show-Disk }
+      '12' { Write-Host 'bye.'; return }
+      default { Write-Host 'please choose 1-12.' }
     }
     $null = Read-Host "`nPress Enter to continue"
   }

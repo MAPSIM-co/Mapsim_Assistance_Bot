@@ -217,6 +217,10 @@ The same actions are also available as installer flags (`--public`,
   MetaTrader 5 folder, downloads the newest EA release and copies the expert,
   include files, libraries and sounds into place; menu 10 checks for a newer
   version and updates with one key.
+- **Check server storage** — `Mapsim_BOT` menu 11 shows every filesystem, the
+  dashboard folder sizes and free space. The panel at the top of the menu also
+  shows free disk space at all times (green below 75% used, yellow 75–89%,
+  red 90% or more).
 - **Remove everything** — `Mapsim_BOT` menu 8 (or `install.sh --uninstall` /
   `install.ps1 -Uninstall`) deletes the app, the auto-start service, the
   password file and all logs. Nothing touches MetaTrader 5.

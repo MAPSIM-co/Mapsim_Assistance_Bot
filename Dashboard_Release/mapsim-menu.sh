@@ -19,6 +19,7 @@ MENU_CMD="Mapsim_BOT"
 CONFIG_DIR="$HOME/.config/mapsim-dashboard"
 ENV_FILE="$CONFIG_DIR/mapsim-dashboard.env"
 PID_FILE="$CONFIG_DIR/dashboard.pid"
+PORT_FILE="$CONFIG_DIR/dashboard.port"
 LOG_FILE="$CONFIG_DIR/dashboard.log"
 WRAPPER="$HOME/.local/bin/mapsim-dashboard"
 SERVICE_NAME="mapsim-dashboard.service"
@@ -69,6 +70,14 @@ msg_ok()   { printf '%b\n' "${GREEN}✓ $*${NC}"; }
 msg_info() { printf '%b\n' "${BLUE}ℹ $*${NC}"; }
 msg_warn() { printf '%b\n' "${YELLOW}⚠ $*${NC}"; }
 msg_err()  { printf '%b\n' "${RED}✗ $*${NC}"; }
+
+disk_summary() {
+  df -h "$HOME" 2>/dev/null | awk 'NR==2 {print $4 " free of " $2 " (" $5 " used)"}'
+}
+
+disk_usage_pct() {
+  df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {gsub("%", "", $5); print $5}'
+}
 
 hline() {
   n=$1
@@ -157,6 +166,17 @@ dashboard_pid() {
 
 current_bind() {
   [ -f "$ENV_FILE" ] && grep -E '^MAPSIM_DASHBOARD_BIND=' "$ENV_FILE" | tail -n 1 | cut -d= -f2 || true
+}
+
+current_port() {
+  if [ -f "$PORT_FILE" ]; then
+    p=$(tail -n 1 "$PORT_FILE")
+    case "$p" in
+      ''|*[!0-9]*) : ;;
+      *) echo "$p"; return ;;
+    esac
+  fi
+  echo "8765"
 }
 
 current_password() {
@@ -480,6 +500,7 @@ start_dashboard() {
   i=0
   while [ "$i" -lt 20 ]; do
     if [ -n "$(dashboard_pid)" ] && dashboard_up "$port"; then
+      echo "$port" > "$PORT_FILE"
       echo "dashboard is up:"
       echo "  local   : http://127.0.0.1:$port/"
       if [ "$bind" = "0.0.0.0" ]; then
@@ -513,15 +534,14 @@ show_status() {
   else
     echo "dashboard : stopped"
   fi
-  for p in 8765; do
-    if dashboard_up "$p"; then
-      echo "port $p   : dashboard answering (HTTP $(http_code "$p"))"
-    elif port_listening "$p"; then
-      echo "port $p   : busy (another program)"
-    else
-      echo "port $p   : free"
-    fi
-  done
+  p=$(current_port)
+  if dashboard_up "$p"; then
+    echo "port $p   : dashboard answering (HTTP $(http_code "$p"))"
+  elif port_listening "$p"; then
+    echo "port $p   : busy (another program)"
+  else
+    echo "port $p   : free"
+  fi
   bind=$(current_bind)
   [ -n "$bind" ] && echo "bind      : $bind" || echo "bind      : 127.0.0.1 (default)"
   if service_installed; then
@@ -533,6 +553,7 @@ show_status() {
   else
     echo "service   : not installed"
   fi
+  echo "disk      : $(disk_summary)"
 }
 
 ask_default() {
@@ -831,14 +852,46 @@ menu_start() {
   fi
   echo "how should the dashboard be reachable?"
   echo "  1) local only   (this computer, http://127.0.0.1)"
-  echo "  2) internet     (any device, protected by a password)"
+  echo "  2) internet     (any device + this computer, protected by a password)"
   m=$(ask_default "1" "choose 1 or 2")
-  port=$(choose_port)
   if [ "$m" = "2" ]; then
+    bind="0.0.0.0"
     password=$(prompt_password)
-    start_dashboard "0.0.0.0" "$password" "$port"
   else
-    start_dashboard "127.0.0.1" "$(current_password || echo "")" "$port"
+    bind="127.0.0.1"
+    password=$(current_password || true)
+    [ -z "$password" ] && password=$(gen_password)
+  fi
+  old_pid=$(dashboard_pid)
+  if [ -n "$old_pid" ]; then
+    echo "the dashboard is already running (pid $old_pid, port $(current_port), bind $(current_bind || echo 127.0.0.1))."
+    a=$(ask_default "y" "stop it and restart with the new settings? (y/n)")
+    if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
+      echo "cancelled - the running dashboard was not changed."
+      return
+    fi
+    stop_dashboard
+  fi
+  port=$(choose_port)
+  start_dashboard "$bind" "$password" "$port"
+}
+
+menu_disk() {
+  echo "server disk usage:"
+  df -h / "$HOME" 2>/dev/null | awk 'NR==1 || !seen[$1]++'
+  echo ""
+  echo "dashboard folders:"
+  for d in "$APP_ROOT" "$CONFIG_DIR"; do
+    if [ -e "$d" ]; then
+      du -sh "$d" 2>/dev/null || true
+    fi
+  done
+  if [ -f "$LOG_FILE" ]; then
+    echo "log file: $(du -h "$LOG_FILE" 2>/dev/null | awk '{print $1}') ($LOG_FILE)"
+  fi
+  if [ -d "$HOME/.wine/drive_c" ]; then
+    echo ""
+    echo "MetaTrader (Wine) drive occupies: $(du -sh "$HOME/.wine/drive_c" 2>/dev/null | awk '{print $1}')"
   fi
 }
 
@@ -930,10 +983,24 @@ menu_main() {
       ea="${YELLOW}$ea_plain${NC}"
     fi
     bind=$(current_bind)
+    port=$(current_port)
     if [ "$bind" = "0.0.0.0" ]; then
-      acc="internet (password required)"
+      acc="internet (0.0.0.0) - port $port"
     else
-      acc="local only (this computer)"
+      acc="local only - port $port"
+    fi
+    disk=$(disk_summary)
+    [ -z "$disk" ] && disk="unknown"
+    pct=$(disk_usage_pct)
+    case "$pct" in
+      ''|*[!0-9]*) pct=0 ;;
+    esac
+    if [ "$pct" -ge 90 ]; then
+      disk_col="$RED"
+    elif [ "$pct" -ge 75 ]; then
+      disk_col="$YELLOW"
+    else
+      disk_col="$GREEN"
     fi
 
     show_title
@@ -942,6 +1009,7 @@ menu_main() {
     ui_row "App" "$app_plain" "$app"
     ui_row "Expert" "$ea_plain" "$ea"
     ui_row "Access" "$acc" "${CYAN}$acc${NC}"
+    ui_row "Disk" "$disk" "${disk_col}$disk${NC}"
     ui_sep
     ui_item "1" "Status"
     ui_item "2" "Start dashboard"
@@ -953,7 +1021,8 @@ menu_main() {
     ui_item "8" "Uninstall everything"
     ui_item "9" "Expert Advisor: install / update"
     ui_item "10" "Expert Advisor: version check"
-    ui_item "11" "Exit"
+    ui_item "11" "Disk space / server storage"
+    ui_item "12" "Exit"
     ui_bottom
     printf '\n%s' "${CYAN}Enter Number Of List:${NC} "
     if ! IFS= read -r c; then
@@ -972,8 +1041,9 @@ menu_main() {
       8) menu_uninstall ;;
       9) menu_ea_install ;;
       10) menu_ea_status ;;
-      11) echo "bye."; exit 0 ;;
-      *) msg_warn "please choose 1-11." ;;
+      11) menu_disk ;;
+      12) echo "bye."; exit 0 ;;
+      *) msg_warn "please choose 1-12." ;;
     esac
     printf '%s' "${CYAN}Press Enter to continue...${NC}"
     IFS= read -r _ || { echo ""; exit 0; }
