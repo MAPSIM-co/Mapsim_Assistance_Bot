@@ -84,6 +84,7 @@ setup):
 │  App       : installed                                                        │
 │  Expert    : v213.1.6                                                         │
 │  Access    : internet (0.0.0.0) - port 8766                                   │
+│  Snapshot  : ok (12s ago)                                                     │
 │  Disk      : 42.3 GB free of 80 GB (47% used)                                 │
 ├───────────────────────────────────────────────────────────────────────────────┤
 │    1 - Status                                                                 │
@@ -93,7 +94,8 @@ setup):
 ```
 
 The panel always shows whether the dashboard is running, the installed Expert
-version, the access mode/port and free disk space (green below 75% used, yellow
+version, the access mode/port, whether the live snapshot file is being read
+(and how old it is) and free disk space (green below 75% used, yellow
 75–89%, red 90% or more).
 
   1) Status                        - installed? running? which port? service? disk?
@@ -115,7 +117,30 @@ version, the access mode/port and free disk space (green below 75% used, yellow
  10) Expert Advisor: version check - shows installed vs latest, offers the update
  11) Disk space / server storage   - all filesystems, dashboard folder sizes,
                                      free space and the dashboard log size
- 12) Exit
+ 12) Snapshot file / data source   - shows the snapshot the dashboard reads,
+                                     auto-detects it in every Wine prefix, or lets
+                                     you type a path. You can enter the file itself,
+                                     the MQL5 folder, the MT5 folder in native form
+                                     (`/home/user/mt5/drive_c/Program Files/MetaTrader 5`)
+                                     or Windows form (`C:\Program Files\MetaTrader 5`);
+                                     `C:` and other drive letters are mapped to the
+                                     detected Wine prefix and `MQL5/Files/MapsimLive/
+                                     snapshot.json` is derived from it
+ 13) Exit
+
+### Snapshot / data source
+
+The dashboard only reads files — it never writes to MetaTrader. It looks for
+`MQL5/Files/MapsimLive/snapshot.json` in every Wine prefix it can find
+(`~/.wine/drive_c`, `~/<prefix>/drive_c`, the Flatpak prefix and the macOS MT5
+container) and uses the newest file.
+If your MT5 lives somewhere unusual, open menu **12**, pick option 2 and type
+either the snapshot file, the MQL5 folder or the MT5 folder — Windows-style
+paths such as `C:\Program Files\MetaTrader 5` are understood and translated
+into the right `drive_c` folder. The chosen path is stored in
+`~/.config/mapsim-dashboard/mapsim-dashboard.env` as `MAPSIM_SNAPSHOT` and
+passed to the dashboard at every start; option 3 clears it again so the
+dashboard searches by itself.
 
 ### Expert Advisor management
 

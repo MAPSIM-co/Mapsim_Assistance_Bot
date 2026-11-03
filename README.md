@@ -221,6 +221,12 @@ The same actions are also available as installer flags (`--public`,
   dashboard folder sizes and free space. The panel at the top of the menu also
   shows free disk space at all times (green below 75% used, yellow 75–89%,
   red 90% or more).
+- **Point the dashboard at your data** — `Mapsim_BOT` menu 12 shows which
+  `snapshot.json` the dashboard reads and how old it is. It searches every Wine
+  prefix for `MQL5/Files/MapsimLive/snapshot.json`; if your MT5 lives elsewhere,
+  type the file, the MQL5 folder or the MT5 folder itself — Windows-style paths
+  such as `C:\Program Files\MetaTrader 5` are translated to the right
+  `drive_c` folder automatically.
 - **Remove everything** — `Mapsim_BOT` menu 8 (or `install.sh --uninstall` /
   `install.ps1 -Uninstall`) deletes the app, the auto-start service, the
   password file and all logs. Nothing touches MetaTrader 5.

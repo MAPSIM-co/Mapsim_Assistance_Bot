@@ -183,6 +183,193 @@ current_password() {
   [ -f "$ENV_FILE" ] && grep -E '^MAPSIM_DASHBOARD_PASSWORD=' "$ENV_FILE" | tail -n 1 | cut -d= -f2 || true
 }
 
+current_snapshot() {
+  v=$([ -f "$ENV_FILE" ] && grep -E '^MAPSIM_SNAPSHOT=' "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true)
+  case "$v" in
+    \'*\') v=${v#\'}; v=${v%\'} ;;
+  esac
+  printf '%s\n' "$v"
+}
+
+# Wine prefixes where MetaTrader 5 can live, one per line.
+mt5_bases() {
+  case "$OS" in
+    Darwin)
+      [ -d "$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c" ] \
+        && echo "$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c"
+      ;;
+    Linux)
+      [ -d "$HOME/.wine/drive_c" ] && echo "$HOME/.wine/drive_c"
+      [ -d "$HOME/.var/app/net.metaquotes.wine.metatrader5/drive_c" ] && echo "$HOME/.var/app/net.metaquotes.wine.metatrader5/drive_c"
+      for d in "$HOME"/*/drive_c; do
+        [ -d "$d" ] && echo "$d"
+      done
+      ;;
+  esac
+}
+
+# Newest MapsimLive/snapshot.json across the detected MT5 data folders.
+# A stored MAPSIM_SNAPSHOT value wins while the file it points at still exists.
+find_snapshot() {
+  stored=$(current_snapshot)
+  if [ -n "$stored" ] && [ -f "$stored" ]; then
+    echo "$stored"
+    return
+  fi
+  list=$(ea_find_mql5 2>/dev/null)
+  [ -z "$list" ] && return
+  best=""
+  best_t=-1
+  old_ifs=$IFS
+  IFS='
+'
+  for d in $list; do
+    cand="$d/Files/MapsimLive/snapshot.json"
+    if [ -f "$cand" ]; then
+      t=$(stat -c %Y "$cand" 2>/dev/null || stat -f %m "$cand" 2>/dev/null || echo 0)
+      case "$t" in ''|*[!0-9]*) t=0 ;; esac
+      if [ "$t" -gt "$best_t" ]; then
+        best="$cand"
+        best_t=$t
+      fi
+    fi
+  done
+  IFS=$old_ifs
+  [ -n "$best" ] && echo "$best"
+}
+
+file_age() {
+  t=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0)
+  case "$t" in ''|*[!0-9]*) t=0 ;; esac
+  [ "$t" -le 0 ] && { echo "unknown age"; return; }
+  now=$(date +%s)
+  d=$((now - t))
+  [ "$d" -lt 0 ] && d=0
+  if [ "$d" -lt 90 ]; then
+    echo "${d}s ago"
+  elif [ "$d" -lt 5400 ]; then
+    echo "$((d / 60))m ago"
+  else
+    echo "$((d / 3600))h ago"
+  fi
+}
+
+# Pick the Wine prefix that holds a Windows path.
+# $1 = optional path relative to drive_c; used to choose between prefixes.
+pick_wine_prefix() {
+  rel=${1:-}
+  list=$(mt5_bases 2>/dev/null | sed 's#/drive_c/*$##' || true)
+  if [ -n "$rel" ] && [ -n "$list" ]; then
+    matches=""
+    old_ifs=$IFS
+    IFS='
+'
+    for d in $list; do
+      if [ -e "$d/drive_c/$rel" ]; then
+        matches="${matches}${d}
+"
+      fi
+    done
+    IFS=$old_ifs
+    if [ -n "$matches" ]; then
+      list=$(printf '%s' "$matches")
+    fi
+  fi
+  count=$(printf '%s\n' "$list" | grep -c .)
+  if [ "$count" -eq 1 ]; then
+    printf '%s\n' "$list"
+    return 0
+  fi
+  if [ "$count" -gt 1 ]; then
+    msg_info "Wine prefixes found:" >&2
+    i=1
+    old_ifs=$IFS
+    IFS='
+'
+    for d in $list; do
+      printf '  %s) %s\n' "$i" "$d" >&2
+      i=$((i + 1))
+    done
+    IFS=$old_ifs
+    printf 'choose 1-%s: ' "$count" >&2
+    IFS= read -r pick || return 1
+    i=1
+    old_ifs=$IFS
+    IFS='
+'
+    for d in $list; do
+      if [ "$i" = "$pick" ]; then
+        IFS=$old_ifs
+        printf '%s\n' "$d"
+        return 0
+      fi
+      i=$((i + 1))
+    done
+    IFS=$old_ifs
+    echo "error: invalid choice." >&2
+    return 1
+  fi
+  printf 'Wine prefix folder (the one that contains drive_c, e.g. ~/mt5): ' >&2
+  IFS= read -r dir || return 1
+  dir=$(printf '%s' "$dir" | sed "s/^'//; s/'$//")
+  if [ ! -d "$dir/drive_c" ]; then
+    echo "error: no drive_c inside: $dir" >&2
+    return 1
+  fi
+  printf '%s\n' "$dir"
+}
+
+# Turn what the user typed into the snapshot.json path. Accepts the file
+# itself, an MT5 folder (native or Windows style like C:\Program Files\MetaTrader 5),
+# an MQL5 folder, a drive_c folder or a whole Wine prefix.
+resolve_snapshot_input() {
+  raw=$1
+  raw=$(printf '%s' "$raw" | sed "s/^[[:space:]]*//; s/[[:space:]]*$//; s/^'//; s/'$//; s/^\"//; s/\"$//")
+  [ -z "$raw" ] && return 1
+  case "$raw" in
+    [A-Za-z]:[\\/]*|[A-Za-z]:)
+      drive=$(printf '%s' "$raw" | cut -c1 | tr 'A-Z' 'a-z')
+      rest=$(printf '%s' "$raw" | cut -c3- | sed 's#\\#/#g; s#^/##')
+      prefix=$(pick_wine_prefix "$rest") || return 1
+      base="$prefix/drive_$drive"
+      [ -n "$rest" ] && base="$base/$rest"
+      ;;
+    *)
+      base=$raw
+      ;;
+  esac
+  base=$(printf '%s' "$base" | sed 's#/*$##')
+  if [ -f "$base" ]; then
+    printf '%s\n' "$base"
+    return 0
+  fi
+  if [ -d "$base" ]; then
+    found=$(find "$base" -maxdepth 9 -type f -path '*/MapsimLive/snapshot.json' 2>/dev/null | head -n 1)
+    if [ -n "$found" ]; then
+      printf '%s\n' "$found"
+      return 0
+    fi
+    case "$base" in
+      */MQL5)
+        cand="$base/Files/MapsimLive/snapshot.json"
+        ;;
+      *)
+        if [ -d "$base/MQL5" ]; then
+          cand="$base/MQL5/Files/MapsimLive/snapshot.json"
+        elif [ -d "$base/drive_c" ]; then
+          cand="$base/drive_c/Program Files/MetaTrader 5/MQL5/Files/MapsimLive/snapshot.json"
+        else
+          cand="$base/MQL5/Files/MapsimLive/snapshot.json"
+        fi
+        ;;
+    esac
+    printf '%s\n' "$cand"
+    return 0
+  fi
+  printf '%s\n' "$base"
+  return 0
+}
+
 # Prompts go to stderr so callers can capture the answer with $(ask ...).
 ask() {
   printf '%s' "$1 " >&2
@@ -194,14 +381,27 @@ ask() {
 
 # ---------------------------------------------------------------- env/wrapper
 
+# write_env_file <bind> <password> [snapshot]
+# snapshot omitted -> keep the stored path or auto-detect it; "" -> no path.
 write_env_file() {
   bind="$1"
   password="$2"
+  snap=${3-__auto__}
+  if [ "$snap" = "__auto__" ]; then
+    snap=$(current_snapshot)
+    if [ -z "$snap" ] || [ ! -f "$snap" ]; then
+      snap=$(find_snapshot)
+    fi
+  fi
   mkdir -p "$CONFIG_DIR"
   chmod 700 "$CONFIG_DIR"
   {
     echo "MAPSIM_DASHBOARD_BIND=$bind"
     echo "MAPSIM_DASHBOARD_PASSWORD=$password"
+    if [ -n "$snap" ]; then
+      # quoted: MT5 paths contain spaces, and the launcher sources this file
+      echo "MAPSIM_SNAPSHOT='$snap'"
+    fi
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 }
@@ -554,6 +754,11 @@ start_dashboard() {
     return 1
   fi
   write_env_file "$bind" "$password"
+  snap=$(current_snapshot)
+  if [ -z "$snap" ] || [ ! -f "$snap" ]; then
+    echo "warning: no Mapsim snapshot was found in any MT5 folder."
+    echo "         start MT5 with the Expert loaded, or set the file in menu 12."
+  fi
   mkdir -p "$CONFIG_DIR"
   nohup "$WRAPPER" --no-browser --port "$port" >>"$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
@@ -614,6 +819,17 @@ show_status() {
     echo "service   : not installed"
   fi
   echo "disk      : $(disk_summary)"
+  snap=$(current_snapshot)
+  [ -z "$snap" ] && snap=$(find_snapshot)
+  if [ -n "$snap" ]; then
+    if [ -f "$snap" ]; then
+      echo "snapshot  : $snap ($(file_age "$snap"))"
+    else
+      echo "snapshot  : $snap (MISSING - menu 12 to change)"
+    fi
+  else
+    echo "snapshot  : not found (no MQL5/Files/MapsimLive/snapshot.json - menu 12)"
+  fi
 }
 
 ask_default() {
@@ -647,17 +863,10 @@ ea_installed_path() {
 
 # Print detected MT5 MQL5 folders, one per line.
 ea_find_mql5() {
-  case "$OS" in
-    Darwin)
-      base="$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c"
-      ;;
-    Linux)
-      base="$HOME/.wine/drive_c"
-      ;;
-  esac
-  if [ -n "${base:-}" ] && [ -d "$base" ]; then
-    find "$base" -maxdepth 6 -type d -name MQL5 2>/dev/null
-  fi
+  mt5_bases | while IFS= read -r base; do
+    [ -d "$base" ] || continue
+    find "$base" -maxdepth 9 -type d -name MQL5 2>/dev/null
+  done | awk '!seen[$0]++'
 }
 
 # Pick the right .ex5 for this OS from the extracted package root.
@@ -949,9 +1158,97 @@ menu_disk() {
   if [ -f "$LOG_FILE" ]; then
     echo "log file: $(du -h "$LOG_FILE" 2>/dev/null | awk '{print $1}') ($LOG_FILE)"
   fi
-  if [ -d "$HOME/.wine/drive_c" ]; then
+  bases=$(mt5_bases 2>/dev/null || true)
+  if [ -n "$bases" ]; then
     echo ""
-    echo "MetaTrader (Wine) drive occupies: $(du -sh "$HOME/.wine/drive_c" 2>/dev/null | awk '{print $1}')"
+    echo "MetaTrader (Wine) drives:"
+    old_ifs=$IFS
+    IFS='
+'
+    for d in $bases; do
+      echo "  $(du -sh "$d" 2>/dev/null | awk '{print $1}')  $d"
+    done
+    IFS=$old_ifs
+  fi
+}
+
+menu_snapshot() {
+  if ! is_installed; then
+    echo "the dashboard is not installed yet - install it first (menu 4)."
+    return
+  fi
+  cur=$(current_snapshot)
+  det=$(find_snapshot)
+  if [ -n "$cur" ]; then
+    if [ -f "$cur" ]; then
+      echo "saved snapshot : $cur ($(file_age "$cur"))"
+    else
+      echo "saved snapshot : $cur (missing)"
+    fi
+  else
+    echo "saved snapshot : not set (auto-detect is used)"
+  fi
+  if [ -n "$det" ]; then
+    echo "detected       : $det ($(file_age "$det"))"
+  else
+    echo "detected       : nothing (no MQL5/Files/MapsimLive/snapshot.json yet)"
+  fi
+  echo "  1) use the detected file"
+  printf '  2) enter a path (snapshot.json, MT5 folder, or C:\\Program Files\\MetaTrader 5)\n'
+  echo "  3) clear (let the dashboard search by itself)"
+  m=$(ask_default "1" "choose 1, 2 or 3")
+  case "$m" in
+    1)
+      if [ -z "$det" ]; then
+        echo "nothing was detected - the saved value was not changed."
+        return
+      fi
+      new="$det"
+      ;;
+    2)
+      printf '%s' 'path: ' >&2
+      IFS= read -r typed || typed=""
+      if [ -z "$typed" ]; then
+        echo "cancelled."
+        return
+      fi
+      new=$(resolve_snapshot_input "$typed")
+      if [ -z "$new" ]; then
+        echo "cancelled."
+        return
+      fi
+      if [ ! -f "$new" ]; then
+        echo "not found yet: $new"
+        a=$(ask_default "y" "save this path anyway? (y/n)")
+        if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
+          echo "cancelled."
+          return
+        fi
+      fi
+      ;;
+    3)
+      new=""
+      ;;
+    *)
+      echo "cancelled."
+      return
+      ;;
+  esac
+  bind=$(current_bind); [ -z "$bind" ] && bind="127.0.0.1"
+  password=$(current_password)
+  write_env_file "$bind" "$password" "$new"
+  if [ -n "$new" ]; then
+    echo "saved: snapshot = $new"
+  else
+    echo "saved: snapshot = auto-detect"
+  fi
+  if [ -n "$(dashboard_pid)" ]; then
+    a=$(ask_default "y" "restart the dashboard now? (y/n)")
+    if [ "$a" = "y" ] || [ "$a" = "Y" ]; then
+      stop_dashboard
+      port=$(choose_port)
+      start_dashboard "$bind" "$password" "$port"
+    fi
   fi
 }
 
@@ -1062,6 +1359,18 @@ menu_main() {
     else
       disk_col="$GREEN"
     fi
+    snap=$(current_snapshot)
+    [ -z "$snap" ] && snap=$(find_snapshot)
+    if [ -n "$snap" ] && [ -f "$snap" ]; then
+      snap_plain="ok ($(file_age "$snap"))"
+      snap_col="${GREEN}$snap_plain${NC}"
+    elif [ -n "$snap" ]; then
+      snap_plain="missing"
+      snap_col="${RED}$snap_plain${NC}"
+    else
+      snap_plain="not found"
+      snap_col="${RED}$snap_plain${NC}"
+    fi
 
     show_title
     ui_top
@@ -1069,6 +1378,7 @@ menu_main() {
     ui_row "App" "$app_plain" "$app"
     ui_row "Expert" "$ea_plain" "$ea"
     ui_row "Access" "$acc" "${CYAN}$acc${NC}"
+    ui_row "Snapshot" "$snap_plain" "$snap_col"
     ui_row "Disk" "$disk" "${disk_col}$disk${NC}"
     ui_sep
     ui_item "1" "Status"
@@ -1082,7 +1392,8 @@ menu_main() {
     ui_item "9" "Expert Advisor: install / update"
     ui_item "10" "Expert Advisor: version check"
     ui_item "11" "Disk space / server storage"
-    ui_item "12" "Exit"
+    ui_item "12" "Snapshot file / data source"
+    ui_item "13" "Exit"
     ui_bottom
     printf '\n%s' "${CYAN}Enter Number Of List:${NC} "
     if ! IFS= read -r c; then
@@ -1102,8 +1413,9 @@ menu_main() {
       9) menu_ea_install ;;
       10) menu_ea_status ;;
       11) menu_disk ;;
-      12) echo "bye."; exit 0 ;;
-      *) msg_warn "please choose 1-12." ;;
+      12) menu_snapshot ;;
+      13) echo "bye."; exit 0 ;;
+      *) msg_warn "please choose 1-13." ;;
     esac
     printf '%s' "${CYAN}Press Enter to continue...${NC}"
     IFS= read -r _ || { echo ""; exit 0; }
