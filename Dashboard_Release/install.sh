@@ -37,7 +37,7 @@ for arg in "$@"; do
     --no-launch) LAUNCH=0 ;;
     --version=*) MAPSIM_DASHBOARD_VERSION="${arg#--version=}" ;;
     -h|--help)
-      sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -128,6 +128,31 @@ fi
 exec "$exec_target" --bind "\${MAPSIM_DASHBOARD_BIND:-127.0.0.1}" "\$@"
 EOF
   chmod +x "$WRAPPER"
+}
+
+install_command_link() {
+  # Make the command available even when ~/.local/bin is not on PATH (e.g. root
+  # on many VPS images). Only link into directories we can write without sudo.
+  LINK=""
+  for dir in /usr/local/bin /usr/bin; do
+    if [ -d "$dir" ] && [ -w "$dir" ]; then
+      ln -sf "$WRAPPER" "$dir/mapsim-dashboard"
+      LINK="$dir/mapsim-dashboard"
+      break
+    fi
+  done
+  if [ -z "$LINK" ] && ! printf '%s' ":$PATH:" | grep -q ":$HOME/.local/bin:"; then
+    echo "note: add $HOME/.local/bin to your PATH to use the 'mapsim-dashboard' command:"
+    echo "      export PATH=\"\$HOME/.local/bin:\$PATH\""
+  fi
+}
+
+remove_command_link() {
+  for dir in /usr/local/bin /usr/bin; do
+    if [ -L "$dir/mapsim-dashboard" ]; then
+      rm -f "$dir/mapsim-dashboard"
+    fi
+  done
 }
 
 install_service_linux_root() {
@@ -261,6 +286,7 @@ stop_app() {
 
 uninstall_everything() {
   remove_service
+  remove_command_link
   stop_app
   case "$OS" in
     Darwin)
@@ -317,8 +343,8 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT INT TERM
 
 echo "downloading $ASSET ..."
-curl -fL --retry 3 --retry-delay 2 -o "$TMP/$ASSET" "$BASE/$ASSET"
-curl -fL --retry 3 --retry-delay 2 -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"
+curl -fsSL --retry 3 --retry-delay 2 -o "$TMP/$ASSET" "$BASE/$ASSET"
+curl -fsSL --retry 3 --retry-delay 2 -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"
 
 echo "verifying checksum ..."
 if command -v sha256sum >/dev/null 2>&1; then
@@ -369,7 +395,9 @@ if [ "$PUBLIC" -eq 1 ]; then
 fi
 
 write_wrapper
+install_command_link
 echo "command  : mapsim-dashboard (loads $ENV_FILE)"
+[ -n "$LINK" ] && echo "linked   : $LINK"
 
 if [ "$SERVICE" -eq 1 ]; then
   install_service
