@@ -49,9 +49,121 @@ verifies its SHA-256 checksum, installs it for the current user and starts it:
 | Linux | `~/.local/share/MapsimDashboard` (plus a `mapsim-dashboard` command and app-menu entry) |
 | Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a Desktop shortcut) |
 
-No Python installation is required. To install without starting the app, run
-`install.sh --no-launch` (or `install.ps1 -NoLaunch`); to install a specific
-release, pass `--version=dashboard-vX.Y.Z` (or set `MAPSIM_DASHBOARD_VERSION`).
+No Python installation is required. Options when running the installer file
+directly (download it first):
+
+| Option | macOS/Linux | Windows | Effect |
+|---|---|---|---|
+| `--public` / `-Public` | ✓ | ✓ | allow remote access over the internet (see below) |
+| `--service` / `-Service` | ✓ | ✓ | start the dashboard automatically after every reboot |
+| `--remove-service` / `-RemoveService` | ✓ | ✓ | remove the auto-start service (keeps the app) |
+| `--uninstall` / `-Uninstall` | ✓ | ✓ | remove the dashboard completely |
+| `--no-launch` / `-NoLaunch` | ✓ | ✓ | install only, do not start the app |
+| `--version=…` / `$env:MAPSIM_DASHBOARD_VERSION` | ✓ | ✓ | install a specific release |
+
+---
+
+## Access the dashboard from the internet
+
+By default the dashboard listens on `127.0.0.1` and can only be opened on the
+same computer. To watch it from other machines (your phone, another computer,
+the office), run it with **public mode**: it binds to `0.0.0.0` and requires a
+password on every request. The installer generates the password for you.
+
+```sh
+# macOS / Linux (install + start, public)
+sh install.sh --public
+
+# or, for an installed dashboard:
+MAPSIM_DASHBOARD_PASSWORD='your-password' mapsim-dashboard --bind 0.0.0.0 --no-browser
+```
+
+```powershell
+# Windows (install + start, public)
+.\install.ps1 -Public
+```
+
+After that, open `http://<machine-ip>:8765/` from any device and log in with
+user `mapsim` and the printed password. The password is saved in
+`~/.config/mapsim-dashboard/mapsim-dashboard.env` (macOS/Linux) or
+`%LOCALAPPDATA%\MapsimDashboard\dashboard-access.env` (Windows).
+
+> Security notes
+> - Password protection is **required** by the app when binding beyond
+>   localhost — it refuses to start publicly without one.
+> - For anything beyond a trusted LAN, put the dashboard behind **HTTPS**
+>   (for example `caddy reverse-proxy --from https://dash.example.com
+>   --to 127.0.0.1:8765`) or an **SSH tunnel** / VPN, because the built-in
+>   password travels unencrypted over plain HTTP.
+> - On Linux you may need to open the port, e.g. `sudo ufw allow 8765/tcp`.
+> - On Windows the installer adds a firewall rule when it can; otherwise run
+>   PowerShell as Administrator once.
+
+---
+
+## Run at startup (background service)
+
+To have the dashboard start automatically after every reboot:
+
+```sh
+sh install.sh --service        # macOS/Linux (add --public if it must also be reachable remotely)
+```
+
+```powershell
+.\install.ps1 -Service         # Windows: scheduled task that starts at logon
+```
+
+This installs:
+- **Linux** — a systemd service (`systemctl status mapsim-dashboard`) that
+  starts at boot. Run as root for a system-wide service; otherwise it becomes
+  a user service that survives logout (`loginctl enable-linger`).
+- **macOS** — a per-user LaunchAgent that starts at login and restarts the app
+  if it crashes (`launchctl list | grep mapsim`).
+- **Windows** — a scheduled task `MapsimDashboard` that starts at logon and
+  restarts on failure (`Get-ScheduledTask MapsimDashboard`).
+
+To remove the service (the app stays installed):
+
+```sh
+sh install.sh --remove-service
+```
+
+```powershell
+.\install.ps1 -RemoveService
+```
+
+---
+
+## Remove everything (uninstall)
+
+To stop the dashboard and delete every file it installed:
+
+```sh
+sh install.sh --uninstall      # macOS/Linux
+```
+
+```powershell
+.\install.ps1 -Uninstall       # Windows
+```
+
+This removes the app, the auto-start service/task, the `mapsim-dashboard`
+command, the desktop shortcut / app-menu entry, the saved access password and
+the log folder. Nothing is left behind and MetaTrader 5 / the Expert Advisor
+are never touched. Manual equivalent:
+
+- **macOS** — quit the app, then delete `~/Applications/MapsimDashboard.app`
+  and `~/Library/Application Support/MapsimDashboard`; if a service was
+  installed also delete `~/Library/LaunchAgents/com.mapsim.dashboard.plist`
+  and run `launchctl bootout gui/$UID ~/Library/LaunchAgents/com.mapsim.dashboard.plist`.
+- **Linux** — `pkill -f MapsimDashboard`, then delete `~/.local/share/MapsimDashboard`,
+  `~/.local/bin/mapsim-dashboard`, `~/.local/share/applications/mapsim-dashboard.desktop`
+  and `~/.config/mapsim-dashboard`; if a root service was installed also run
+  `sudo systemctl disable --now mapsim-dashboard.service` and delete
+  `/etc/systemd/system/mapsim-dashboard.service`.
+- **Windows** — end `MapsimDashboard.exe` in Task Manager, then delete
+  `%LOCALAPPDATA%\MapsimDashboard`, `%APPDATA%\MapsimDashboard` and the
+  `Mapsim Live Dashboard` shortcut; if a service was installed also run
+  `Unregister-ScheduledTask -TaskName MapsimDashboard -Confirm:$false`.
 
 ---
 

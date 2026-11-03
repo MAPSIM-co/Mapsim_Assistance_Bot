@@ -187,6 +187,20 @@ verifies its SHA-256 checksum, installs it for your user and starts it:
 | Linux | `~/.local/share/MapsimDashboard` (plus `mapsim-dashboard` command and app-menu entry) |
 | Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a Desktop shortcut) |
 
+The same installer can also:
+
+- **Watch the dashboard from the internet / other devices** — rerun it with
+  `--public` (or `-Public`): it binds to all network interfaces with a
+  generated password (user `mapsim`). Plain HTTP, so prefer a trusted network
+  or put it behind HTTPS — details in
+  [`Dashboard_Release/README.md`](Dashboard_Release/README.md).
+- **Start automatically after every reboot** — rerun it with `--service`
+  (or `-Service`): systemd on Linux, LaunchAgent on macOS, a scheduled task on
+  Windows.
+- **Remove everything** — run `install.sh --uninstall` (or
+  `install.ps1 -Uninstall`) to delete the app, the auto-start service, the
+  password file and all logs. Nothing touches MetaTrader 5.
+
 ### Download
 
 Open the [**Releases**](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/releases/latest)
