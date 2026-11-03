@@ -16,6 +16,32 @@ import urllib.request
 from pathlib import Path
 
 
+_DETAIL: list[str] = []
+
+
+def annotate(message: str) -> None:
+    """Surface the failure as a GitHub Actions annotation (readable without admin rights)."""
+    text = " ".join(message.split()).replace("%", "%25")
+    print(f"::error title=smoke test::{text[:900]}")
+
+
+def app_log_tail(lines: int = 8) -> str:
+    home = Path.home()
+    candidates = [
+        home / "Library" / "Application Support" / "MapsimDashboard" / "dashboard.log",
+        home / ".local" / "share" / "MapsimDashboard" / "dashboard.log",
+        Path(os.environ.get("APPDATA", "/nonexistent")) / "MapsimDashboard" / "dashboard.log",
+    ]
+    for path in candidates:
+        try:
+            if path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                return " | ".join(text.splitlines()[-lines:])
+        except OSError:
+            continue
+    return ""
+
+
 def resolve_executable(artifact: Path) -> Path:
     if artifact.is_dir() and artifact.suffix == ".app":
         executable = artifact / "Contents" / "MacOS" / artifact.stem
@@ -149,6 +175,11 @@ def main() -> int:
             if process.poll() is not None:
                 output = (process.stdout.read() if process.stdout else "") or ""
                 print(output[-4000:])
+                log = app_log_tail()
+                if log:
+                    print("dashboard.log:", log)
+                _DETAIL.append(f"app output: {output[-600:] or '(empty)'}")
+                _DETAIL.append(f"dashboard.log: {log or '(not written)'}")
                 raise SystemExit(f"dashboard exited early with code {process.returncode}")
             try:
                 request = urllib.request.Request(url)
@@ -164,12 +195,21 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001 - startup races are expected
                 last_error = f"{type(exc).__name__}: {exc}"
             time.sleep(0.5)
+        log = app_log_tail()
+        _DETAIL.append(f"last error: {last_error}")
+        _DETAIL.append(f"dashboard.log: {log or '(not written)'}")
         raise SystemExit(f"timed out waiting for {url} ({last_error})")
     finally:
         stop_tree(process)
         if not port_is_closed(port):
+            _DETAIL.append(f"port {port} was left open")
             raise SystemExit(f"the dashboard left port {port} open after shutdown")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            annotate(" | ".join([str(exc.code), *_DETAIL]))
+        raise
