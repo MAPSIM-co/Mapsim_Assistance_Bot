@@ -179,6 +179,40 @@ current_port() {
   echo "8765"
 }
 
+# Address of this machine that a browser on another device can reach.
+host_ip() {
+  case "$OS" in
+    Darwin)
+      for i in en0 en1 en2; do
+        ip=$(ipconfig getifaddr "$i" 2>/dev/null || true)
+        [ -n "$ip" ] && { printf '%s\n' "$ip"; return; }
+      done
+      ;;
+    *)
+      ip=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -v '^$' | head -n 1 || true)
+      if [ -z "$ip" ]; then
+        ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')
+      fi
+      [ -n "$ip" ] && printf '%s\n' "$ip"
+      ;;
+  esac
+}
+
+# URL to open in a browser for the current bind/port.
+access_url() {
+  port=$(current_port)
+  if [ "$(current_bind)" = "0.0.0.0" ]; then
+    ip=$(host_ip)
+    if [ -n "$ip" ]; then
+      printf 'http://%s:%s/\n' "$ip" "$port"
+    else
+      printf 'http://<this-pc-ip>:%s/\n' "$port"
+    fi
+  else
+    printf 'http://127.0.0.1:%s/\n' "$port"
+  fi
+}
+
 current_password() {
   [ -f "$ENV_FILE" ] && grep -E '^MAPSIM_DASHBOARD_PASSWORD=' "$ENV_FILE" | tail -n 1 | cut -d= -f2 || true
 }
@@ -775,9 +809,9 @@ start_dashboard() {
       echo "dashboard is up:"
       echo "  local   : http://127.0.0.1:$port/"
       if [ "$bind" = "0.0.0.0" ]; then
-        if [ "$OS" = "Linux" ]; then
-          ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-          [ -n "$ip" ] && echo "  remote  : http://$ip:$port/ (open the port in your firewall first)"
+        ip=$(host_ip)
+        if [ -n "$ip" ]; then
+          echo "  remote  : http://$ip:$port/ (open the port in your firewall first)"
         else
           echo "  remote  : http://<this-computer-ip>:$port/ (allow the port through your firewall)"
         fi
@@ -815,6 +849,7 @@ show_status() {
   fi
   bind=$(current_bind)
   [ -n "$bind" ] && echo "bind      : $bind" || echo "bind      : 127.0.0.1 (default)"
+  echo "url       : $(access_url)"
   if service_installed; then
     if service_active; then
       echo "service   : installed, ACTIVE"
@@ -1501,6 +1536,7 @@ menu_main() {
     ui_row "App" "$app_plain" "$app"
     ui_row "Expert" "$ea_plain" "$ea"
     ui_row "Access" "$acc" "${CYAN}$acc${NC}"
+    ui_row "URL" "$(access_url)"
     ui_row "Snapshot" "$snap_plain" "$snap_col"
     ui_row "Disk" "$disk" "${disk_col}$disk${NC}"
     ui_sep

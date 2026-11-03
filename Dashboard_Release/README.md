@@ -84,6 +84,7 @@ setup):
 │  App       : installed                                                        │
 │  Expert    : v213.1.6                                                         │
 │  Access    : internet (0.0.0.0) - port 8766                                   │
+│  URL       : http://203.0.113.10:8766/                                        │
 │  Snapshot  : ok (12s ago)                                                     │
 │  Disk      : 42.3 GB free of 80 GB (47% used)                                 │
 ├───────────────────────────────────────────────────────────────────────────────┤
@@ -94,7 +95,9 @@ setup):
 ```
 
 The panel always shows whether the dashboard is running, the installed Expert
-version, the access mode/port, whether the live snapshot file is being read
+version, the access mode/port, the address to open in a browser (server IP in
+internet mode, `http://127.0.0.1:...` locally — terminals make it clickable and
+you can copy it), whether the live snapshot file is being read
 (and how old it is) and free disk space (green below 75% used, yellow
 75–89%, red 90% or more).
 
