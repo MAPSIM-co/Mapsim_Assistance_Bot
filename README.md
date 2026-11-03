@@ -184,21 +184,37 @@ verifies its SHA-256 checksum, installs it for your user and starts it:
 | System | Installed to |
 |---|---|
 | macOS | `~/Applications/MapsimDashboard.app` |
-| Linux | `~/.local/share/MapsimDashboard` (plus `mapsim-dashboard` command and app-menu entry) |
-| Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a Desktop shortcut) |
+| Linux | `~/.local/share/MapsimDashboard` (plus `mapsim-dashboard` / `Mapsim_BOT` commands and an app-menu entry) |
+| Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a `Mapsim_BOT` Desktop shortcut) |
 
-The same installer can also:
+### Mapsim BOT control center
 
-- **Watch the dashboard from the internet / other devices** — rerun it with
-  `--public` (or `-Public`): it binds to all network interfaces with a
-  generated password (user `mapsim`). Plain HTTP, so prefer a trusted network
-  or put it behind HTTPS — details in
-  [`Dashboard_Release/README.md`](Dashboard_Release/README.md).
-- **Start automatically after every reboot** — rerun it with `--service`
-  (or `-Service`): systemd on Linux, LaunchAgent on macOS, a scheduled task on
-  Windows.
-- **Remove everything** — run `install.sh --uninstall` (or
-  `install.ps1 -Uninstall`) to delete the app, the auto-start service, the
+After installing, manage everything from one interactive menu — it asks only
+when a decision is needed (local or internet, port, password, service) and does
+the rest itself:
+
+```sh
+Mapsim_BOT          # macOS / Linux: status, start/stop, install/update,
+                    # auto-start service, access mode/password, uninstall
+```
+
+```powershell
+Mapsim_BOT.cmd      # Windows (Desktop shortcut or %LOCALAPPDATA%\MapsimDashboard)
+```
+
+The same actions are also available as installer flags (`--public`,
+`--service`, `--remove-service`, `--uninstall`) — see
+[`Dashboard_Release/README.md`](Dashboard_Release/README.md):
+
+- **Watch the dashboard from the internet / other devices** — run `Mapsim_BOT`
+  and choose **7) Access mode / password** (or reinstall with `--public` /
+  `-Public`): it binds to all network interfaces with a password (user
+  `mapsim`). Plain HTTP, so prefer a trusted network or put it behind HTTPS.
+- **Start automatically after every reboot** — `Mapsim_BOT` menu 5 (or
+  `--service` / `-Service`): systemd on Linux, LaunchAgent on macOS, a
+  scheduled task on Windows.
+- **Remove everything** — `Mapsim_BOT` menu 8 (or `install.sh --uninstall` /
+  `install.ps1 -Uninstall`) deletes the app, the auto-start service, the
   password file and all logs. Nothing touches MetaTrader 5.
 
 ### Download

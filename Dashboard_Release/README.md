@@ -16,8 +16,10 @@ either the tooling that produces those builds or instructions for using them.
 
 | Path | Purpose |
 |---|---|
-| `install.sh` | One-line installer for macOS and Linux (latest release, checksum-verified) |
-| `install.ps1` | One-line installer for Windows 10/11 (latest release, checksum-verified) |
+| `install.sh` | One-line bootstrap for macOS and Linux (downloads the control center) |
+| `install.ps1` | One-line bootstrap for Windows 10/11 |
+| `mapsim-menu.sh` | Mapsim BOT control center for macOS/Linux (all real logic) |
+| `mapsim-menu.ps1` | Mapsim BOT control center for Windows (all real logic) |
 | `build.py` | Copies a whitelist of dashboard files and packages them with PyInstaller |
 | `entry.py` | Frozen-app entry point (safe logging in windowed builds) |
 | `smoke_test.py` | Launches a built app on a free port and verifies the API and assets |
@@ -40,26 +42,60 @@ curl -fsSL https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/mai
 irm https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.ps1 | iex
 ```
 
-The installer detects your system, downloads the latest `dashboard-v*` release,
-verifies its SHA-256 checksum, installs it for the current user and starts it:
+The bootstrap detects your system, downloads the latest `dashboard-v*` release,
+verifies its SHA-256 checksum, installs it for the current user and starts it
+in local mode. From then on everything is managed through one command:
+
+```sh
+Mapsim_BOT          # macOS / Linux
+```
+
+```powershell
+Mapsim_BOT.cmd      # Windows (on the Desktop shortcut or in %LOCALAPPDATA%\MapsimDashboard)
+```
+
+## Mapsim BOT control center
+
+`Mapsim_BOT` opens an interactive menu that asks only when a decision is
+needed and does everything else by itself (port checks, passwords, service
+setup):
+
+```
+=== Mapsim BOT control center ===
+dashboard: stopped   app: installed
+
+  1) Status                     - installed? running? ports? service?
+  2) Start dashboard            - asks: local only or internet, checks ports,
+                                  asks for a password in internet mode
+  3) Stop dashboard             - stops only this dashboard, frees the port
+  4) Install / update dashboard - downloads the newest release, checksum-checked
+  5) Enable auto-start service  - starts at boot/login (systemd / LaunchAgent /
+                                  scheduled task)
+  6) Remove auto-start service
+  7) Access mode / password     - switch local <-> internet, set a new password
+  8) Uninstall everything       - full removal, asks for confirmation first
+  9) Exit
+```
+
+The installer flags still work when the installer file is run directly
+(download it first), and map to the same actions:
+
+| Option | macOS/Linux | Windows | Effect |
+|---|---|---|---|
+| `--public` / `-Public` | ✓ | ✓ | install with internet access (generated password, user `mapsim`) |
+| `--service` / `-Service` | ✓ | ✓ | also enable auto-start after every reboot |
+| `--remove-service` / `-RemoveService` | ✓ | ✓ | remove the auto-start service (keeps the app) |
+| `--uninstall` / `-Uninstall` | ✓ | ✓ | remove the dashboard completely |
+| `--no-launch` / `-NoLaunch` | ✓ | ✓ | install only, do not start the app |
+| `--version=…` / `-Version` | ✓ | ✓ | install a specific release |
 
 | System | Installed to |
 |---|---|
 | macOS | `~/Applications/MapsimDashboard.app` |
-| Linux | `~/.local/share/MapsimDashboard` (plus a `mapsim-dashboard` command and app-menu entry) |
-| Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a Desktop shortcut) |
+| Linux | `~/.local/share/MapsimDashboard` (plus `mapsim-dashboard` / `Mapsim_BOT` commands and an app-menu entry) |
+| Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a `Mapsim_BOT` Desktop shortcut) |
 
-No Python installation is required. Options when running the installer file
-directly (download it first):
-
-| Option | macOS/Linux | Windows | Effect |
-|---|---|---|---|
-| `--public` / `-Public` | ✓ | ✓ | allow remote access over the internet (see below) |
-| `--service` / `-Service` | ✓ | ✓ | start the dashboard automatically after every reboot |
-| `--remove-service` / `-RemoveService` | ✓ | ✓ | remove the auto-start service (keeps the app) |
-| `--uninstall` / `-Uninstall` | ✓ | ✓ | remove the dashboard completely |
-| `--no-launch` / `-NoLaunch` | ✓ | ✓ | install only, do not start the app |
-| `--version=…` / `$env:MAPSIM_DASHBOARD_VERSION` | ✓ | ✓ | install a specific release |
+No Python installation is required.
 
 ---
 
@@ -68,7 +104,10 @@ directly (download it first):
 By default the dashboard listens on `127.0.0.1` and can only be opened on the
 same computer. To watch it from other machines (your phone, another computer,
 the office), run it with **public mode**: it binds to `0.0.0.0` and requires a
-password on every request. The installer generates the password for you.
+password on every request. The easiest way is the control center: run
+`Mapsim_BOT`, choose **7) Access mode / password** (or start with menu 2 and
+pick "internet") — it asks for the password, checks the port and restarts the
+dashboard for you. For scripted installs:
 
 ```sh
 # macOS / Linux (install + start, public)
@@ -86,7 +125,7 @@ MAPSIM_DASHBOARD_PASSWORD='your-password' mapsim-dashboard --bind 0.0.0.0 --no-b
 After that, open `http://<machine-ip>:8765/` from any device and log in with
 user `mapsim` and the printed password. The password is saved in
 `~/.config/mapsim-dashboard/mapsim-dashboard.env` (macOS/Linux) or
-`%LOCALAPPDATA%\MapsimDashboard\dashboard-access.env` (Windows).
+`%APPDATA%\MapsimDashboard\dashboard-access.env` (Windows).
 
 > Security notes
 > - Password protection is **required** by the app when binding beyond
