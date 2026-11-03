@@ -19,7 +19,12 @@ for arg in "$@"; do
     --no-launch) LAUNCH=0 ;;
     --version=*) MAPSIM_DASHBOARD_VERSION="${arg#--version=}" ;;
     -h|--help)
-      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      cat <<'EOF'
+Usage: install.sh [--no-launch] [--version=dashboard-vX.Y.Z]
+
+  --no-launch                 install only, do not start the dashboard
+  --version=dashboard-vX.Y.Z  install a specific release
+EOF
       exit 0
       ;;
     *)
