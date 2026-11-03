@@ -4,4 +4,6 @@ paramiko>=3.4,<5
 certifi>=2024.8.30
 tzdata>=2024.1
 pillow>=10.4
-cryptography>=43
+# 49+ ships arm64-only macOS wheels: on an Intel runner pip would build from
+# source against Homebrew OpenSSL and bundle a libssl.3 the extension cannot load.
+cryptography>=43,<49
