@@ -164,6 +164,29 @@ market structure, news and the event log in your browser.
 
 No Python installation is required. Download one file, unpack it and run it.
 
+### One-command install
+
+**macOS and Linux** — paste in Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.sh | sh
+```
+
+**Windows 10/11 (64-bit)** — paste in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.ps1 | iex
+```
+
+The installer detects your system, downloads the latest `dashboard-v*` release,
+verifies its SHA-256 checksum, installs it for your user and starts it:
+
+| System | Installed to |
+|---|---|
+| macOS | `~/Applications/MapsimDashboard.app` |
+| Linux | `~/.local/share/MapsimDashboard` (plus `mapsim-dashboard` command and app-menu entry) |
+| Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a Desktop shortcut) |
+
 ### Download
 
 Open the [**Releases**](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/releases/latest)

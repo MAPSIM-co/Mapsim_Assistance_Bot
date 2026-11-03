@@ -16,6 +16,8 @@ either the tooling that produces those builds or instructions for using them.
 
 | Path | Purpose |
 |---|---|
+| `install.sh` | One-line installer for macOS and Linux (latest release, checksum-verified) |
+| `install.ps1` | One-line installer for Windows 10/11 (latest release, checksum-verified) |
 | `build.py` | Copies a whitelist of dashboard files and packages them with PyInstaller |
 | `entry.py` | Frozen-app entry point (safe logging in windowed builds) |
 | `smoke_test.py` | Launches a built app on a free port and verifies the API and assets |
@@ -24,10 +26,41 @@ either the tooling that produces those builds or instructions for using them.
 
 ---
 
+## One-command install (recommended)
+
+**macOS and Linux** — paste in Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.sh | sh
+```
+
+**Windows 10/11 (64-bit)** — paste in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.ps1 | iex
+```
+
+The installer detects your system, downloads the latest `dashboard-v*` release,
+verifies its SHA-256 checksum, installs it for the current user and starts it:
+
+| System | Installed to |
+|---|---|
+| macOS | `~/Applications/MapsimDashboard.app` |
+| Linux | `~/.local/share/MapsimDashboard` (plus a `mapsim-dashboard` command and app-menu entry) |
+| Windows | `%LOCALAPPDATA%\MapsimDashboard` (plus a Desktop shortcut) |
+
+No Python installation is required. To install without starting the app, run
+`install.sh --no-launch` (or `install.ps1 -NoLaunch`); to install a specific
+release, pass `--version=dashboard-vX.Y.Z` (or set `MAPSIM_DASHBOARD_VERSION`).
+
+---
+
 ## Run the app (end users)
 
-1. Open the **Releases** page of this repository.
-2. Download the archive for your system:
+You can use the one-command installer above, or install manually:
+
+1. Open the **Releases** page of this repository and download the archive for
+   your system:
 
    | System | Asset |
    |---|---|
@@ -36,7 +69,7 @@ either the tooling that produces those builds or instructions for using them.
    | Windows x64 | `MapsimDashboard-windows-x64.zip` |
    | Linux x64 | `MapsimDashboard-linux-x64.tar.gz` |
 
-3. Unpack and start the app:
+2. Unpack and start the app:
    - **macOS** — open `MapsimDashboard.app`. If macOS blocks it, right-click the
      app and choose **Open**.
    - **Windows** — run `MapsimDashboard.exe`. If SmartScreen appears, choose
