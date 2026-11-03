@@ -189,7 +189,10 @@ host_ip() {
       done
       ;;
     *)
-      ip=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -v '^$' | head -n 1 || true)
+      ips=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' || true)
+      # Prefer a public address over docker/private interfaces.
+      ip=$(printf '%s\n' "$ips" | grep -vE '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)' | head -n 1 || true)
+      [ -z "$ip" ] && ip=$(printf '%s\n' "$ips" | head -n 1 || true)
       if [ -z "$ip" ]; then
         ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')
       fi
