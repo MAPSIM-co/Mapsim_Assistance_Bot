@@ -53,6 +53,61 @@ need() {
   fi
 }
 
+# ---------------------------------------------------------------- ui (colors, boxes, title)
+
+ESC=$(printf '\033')
+RED="$ESC[0;31m"
+GREEN="$ESC[0;32m"
+YELLOW="$ESC[1;33m"
+BLUE="$ESC[0;34m"
+CYAN="$ESC[0;36m"
+MAGENTA="$ESC[0;35m"
+WHITE="$ESC[1;37m"
+NC="$ESC[0m"
+
+msg_ok()   { printf '%b\n' "${GREEN}✓ $*${NC}"; }
+msg_info() { printf '%b\n' "${BLUE}ℹ $*${NC}"; }
+msg_warn() { printf '%b\n' "${YELLOW}⚠ $*${NC}"; }
+msg_err()  { printf '%b\n' "${RED}✗ $*${NC}"; }
+
+hline() {
+  n=$1
+  out=''
+  while [ "$n" -gt 0 ]; do out="${out}─"; n=$((n - 1)); done
+  printf '%s' "$out"
+}
+
+ui_top()    { printf '%s┌%s┐%s\n' "$CYAN" "$(hline 79)" "$NC"; }
+ui_sep()    { printf '%s├%s┤%s\n' "$CYAN" "$(hline 79)" "$NC"; }
+ui_bottom() { printf '%s└%s┘%s\n' "$CYAN" "$(hline 79)" "$NC"; }
+
+# ui_row LABEL PLAIN [COLORED]  -> one boxed row; PLAIN is the color-stripped
+# text used only to compute padding so the right border stays aligned.
+ui_row() {
+  label=$1
+  plain=$2
+  colored=${3:-"$2"}
+  body=$(printf '%-10s: %s' "$label" "$colored")
+  plainbody=$(printf '%-10s: %s' "$label" "$plain")
+  pad=$((79 - 2 - ${#plainbody}))
+  [ "$pad" -lt 0 ] && pad=0
+  printf '%s│%s  %s%*s%s│%s\n' "$CYAN" "$NC" "$body" "$pad" '' "$CYAN" "$NC"
+}
+
+ui_item() {
+  num=$1
+  text=$2
+  printf '%s│%s   %s%2s%s - %s%-71s%s%s│%s\n' "$CYAN" "$NC" "$MAGENTA" "$num" "$NC" "$WHITE" "$text" "$NC" "$CYAN" "$NC"
+}
+
+show_title() {
+  printf '\n%b\n' "${MAGENTA}    ██   ██  █████  ██████   ██████ ███████ ██   ██   █████   █████  ███████${NC}"
+  printf '%b\n'   "${MAGENTA}    ███ ███ ██   ██ ██   ██ ██      ██      ███ ███  ██   ██ ██   ██   ███  ${NC}"
+  printf '%b\n'   "${MAGENTA}    ██ █ ██ ███████ ██████   █████  ███████ ██ █ ██  ██████  ██   ██   ███  ${NC}"
+  printf '%b\n'   "${MAGENTA}    ██   ██ ██   ██ ██           ██ ██      ██   ██  ██   ██ ██   ██   ███  ${NC}"
+  printf '%b\n'   "${MAGENTA}    ██   ██ ██   ██ ██      ██████  ███████ ██   ██  ██████   █████    ███  ${NC}"
+}
+
 is_installed() { [ -x "$BINARY" ]; }
 
 gen_password() {
@@ -850,26 +905,57 @@ menu_uninstall() {
 
 menu_main() {
   while true; do
-    echo ""
-    echo "=== Mapsim BOT control center ==="
+    if [ -t 1 ]; then clear; fi
     pid=$(dashboard_pid)
-    if [ -n "$pid" ]; then st="running (pid $pid)"; else st="stopped"; fi
-    if is_installed; then app="installed"; else app="not installed"; fi
-    echo "dashboard: $st   app: $app"
-    echo ""
-    echo "  1) Status"
-    echo "  2) Start dashboard"
-    echo "  3) Stop dashboard"
-    echo "  4) Install / update dashboard"
-    echo "  5) Enable auto-start service"
-    echo "  6) Remove auto-start service"
-    echo "  7) Access mode / password"
-    echo "  8) Uninstall everything"
-    echo "  9) Expert Advisor: install / update"
-    echo " 10) Expert Advisor: version check"
-    echo " 11) Exit"
-    echo ""
-    printf 'choose 1-11: '
+    if [ -n "$pid" ]; then
+      st_plain="running (pid $pid)"
+      st="${GREEN}$st_plain${NC}"
+    else
+      st_plain="stopped"
+      st="${RED}$st_plain${NC}"
+    fi
+    if is_installed; then
+      app_plain="installed"
+      app="${GREEN}$app_plain${NC}"
+    else
+      app_plain="not installed"
+      app="${RED}$app_plain${NC}"
+    fi
+    ea=$(ea_installed_version)
+    if [ -n "$ea" ]; then
+      ea_plain="$ea"
+      ea="${GREEN}$ea${NC}"
+    else
+      ea_plain="not installed"
+      ea="${YELLOW}$ea_plain${NC}"
+    fi
+    bind=$(current_bind)
+    if [ "$bind" = "0.0.0.0" ]; then
+      acc="internet (password required)"
+    else
+      acc="local only (this computer)"
+    fi
+
+    show_title
+    ui_top
+    ui_row "Dashboard" "$st_plain" "$st"
+    ui_row "App" "$app_plain" "$app"
+    ui_row "Expert" "$ea_plain" "$ea"
+    ui_row "Access" "$acc" "${CYAN}$acc${NC}"
+    ui_sep
+    ui_item "1" "Status"
+    ui_item "2" "Start dashboard"
+    ui_item "3" "Stop dashboard"
+    ui_item "4" "Install / update dashboard"
+    ui_item "5" "Enable auto-start service"
+    ui_item "6" "Remove auto-start service"
+    ui_item "7" "Access mode / password"
+    ui_item "8" "Uninstall everything"
+    ui_item "9" "Expert Advisor: install / update"
+    ui_item "10" "Expert Advisor: version check"
+    ui_item "11" "Exit"
+    ui_bottom
+    printf '\n%s' "${CYAN}Enter Number Of List:${NC} "
     if ! IFS= read -r c; then
       echo ""
       echo "bye."
@@ -887,8 +973,10 @@ menu_main() {
       9) menu_ea_install ;;
       10) menu_ea_status ;;
       11) echo "bye."; exit 0 ;;
-      *) echo "please choose 1-11." ;;
+      *) msg_warn "please choose 1-11." ;;
     esac
+    printf '%s' "${CYAN}Press Enter to continue...${NC}"
+    IFS= read -r _ || { echo ""; exit 0; }
   done
 }
 

@@ -242,6 +242,54 @@ function Read-Password {
   }
 }
 
+# ---------------------------------------------------------------- ui (colors, boxes, title)
+
+$ESC = [char]27
+$Red     = $ESC + '[0;31m'
+$Green   = $ESC + '[0;32m'
+$Yellow  = $ESC + '[1;33m'
+$Blue    = $ESC + '[0;34m'
+$Cyan    = $ESC + '[0;36m'
+$Magenta = $ESC + '[0;35m'
+$White   = $ESC + '[1;37m'
+$NoColor = $ESC + '[0m'
+
+$BlockCh = [string][char]0x2588
+$BoxH    = [string][char]0x2500
+$BoxV    = [string][char]0x2502
+$BoxTL   = [string][char]0x250C
+$BoxTR   = [string][char]0x2510
+$BoxBL   = [string][char]0x2514
+$BoxBR   = [string][char]0x2518
+$BoxL    = [string][char]0x251C
+$BoxR    = [string][char]0x2524
+
+function Show-Title {
+  Write-Host ''
+  Write-Host ($Magenta + '    ##   ##  #####  ######   ###### ####### ##   ##   #####   #####  #######'.Replace('#', $BlockCh) + $NoColor)
+  Write-Host ($Magenta + '    ### ### ##   ## ##   ## ##      ##      ### ###  ##   ## ##   ##   ###  '.Replace('#', $BlockCh) + $NoColor)
+  Write-Host ($Magenta + '    ## # ## ####### ######   #####  ####### ## # ##  ######  ##   ##   ###  '.Replace('#', $BlockCh) + $NoColor)
+  Write-Host ($Magenta + '    ##   ## ##   ## ##           ## ##      ##   ##  ##   ## ##   ##   ###  '.Replace('#', $BlockCh) + $NoColor)
+  Write-Host ($Magenta + '    ##   ## ##   ## ##      ######  ####### ##   ##  ######   #####    ###  '.Replace('#', $BlockCh) + $NoColor)
+}
+
+function Ui-Top    { Write-Host ($Cyan + $BoxTL + ($BoxH * 79) + $BoxTR + $NoColor) }
+function Ui-Sep    { Write-Host ($Cyan + $BoxL  + ($BoxH * 79) + $BoxR  + $NoColor) }
+function Ui-Bottom { Write-Host ($Cyan + $BoxBL + ($BoxH * 79) + $BoxBR + $NoColor) }
+
+function Ui-Row([string]$Label, [string]$Plain, [string]$Colored) {
+  if (-not $Colored) { $Colored = $Plain }
+  $body = '{0,-10}: {1}' -f $Label, $Colored
+  $plainBody = '{0,-10}: {1}' -f $Label, $Plain
+  $pad = 79 - 2 - $plainBody.Length
+  if ($pad -lt 0) { $pad = 0 }
+  Write-Host ($Cyan + $BoxV + $NoColor + '  ' + $body + (' ' * $pad) + $Cyan + $BoxV + $NoColor)
+}
+
+function Ui-Item([string]$Num, [string]$Text) {
+  Write-Host ($Cyan + $BoxV + $NoColor + '   ' + $Magenta + ('{0,2}' -f $Num) + $NoColor + ' - ' + $White + ('{0,-71}' -f $Text) + $NoColor + $Cyan + $BoxV + $NoColor)
+}
+
 function Choose-Port {
   $p = [int](Read-Default 'port' '8765')
   while (Test-PortListening $p) {
@@ -253,26 +301,38 @@ function Choose-Port {
 
 function Show-Menu {
   while ($true) {
-    Write-Host ''
-    Write-Host '=== Mapsim BOT control center ==='
+    Clear-Host
     $id = Get-DashboardPid
-    if ($id) { $st = "running (pid $id)" } else { $st = 'stopped' }
-    if (Test-Installed) { $app = 'installed' } else { $app = 'not installed' }
-    Write-Host "dashboard: $st   app: $app"
-    Write-Host ''
-    Write-Host '  1) Status'
-    Write-Host '  2) Start dashboard'
-    Write-Host '  3) Stop dashboard'
-    Write-Host '  4) Install / update dashboard'
-    Write-Host '  5) Enable auto-start service'
-    Write-Host '  6) Remove auto-start service'
-    Write-Host '  7) Access mode / password'
-    Write-Host '  8) Uninstall everything'
-    Write-Host '  9) Expert Advisor: install / update'
-    Write-Host ' 10) Expert Advisor: version check'
-    Write-Host ' 11) Exit'
-    Write-Host ''
-    $c = Read-Host 'choose 1-11'
+    if ($id) { $stPlain = "running (pid $id)"; $stCol = $Green + $stPlain + $NoColor }
+    else { $stPlain = 'stopped'; $stCol = $Red + $stPlain + $NoColor }
+    if (Test-Installed) { $appPlain = 'installed'; $appCol = $Green + $appPlain + $NoColor }
+    else { $appPlain = 'not installed'; $appCol = $Red + $appPlain + $NoColor }
+    $ea = Get-EaInstalledVersion
+    if ($ea) { $eaPlain = $ea; $eaCol = $Green + $ea + $NoColor }
+    else { $eaPlain = 'not installed'; $eaCol = $Yellow + $eaPlain + $NoColor }
+    if ((Get-CurrentBind) -eq '0.0.0.0') { $acc = 'internet (password required)' }
+    else { $acc = 'local only (this computer)' }
+
+    Show-Title
+    Ui-Top
+    Ui-Row 'Dashboard' $stPlain $stCol
+    Ui-Row 'App' $appPlain $appCol
+    Ui-Row 'Expert' $eaPlain $eaCol
+    Ui-Row 'Access' $acc ($Cyan + $acc + $NoColor)
+    Ui-Sep
+    Ui-Item '1' 'Status'
+    Ui-Item '2' 'Start dashboard'
+    Ui-Item '3' 'Stop dashboard'
+    Ui-Item '4' 'Install / update dashboard'
+    Ui-Item '5' 'Enable auto-start service'
+    Ui-Item '6' 'Remove auto-start service'
+    Ui-Item '7' 'Access mode / password'
+    Ui-Item '8' 'Uninstall everything'
+    Ui-Item '9' 'Expert Advisor: install / update'
+    Ui-Item '10' 'Expert Advisor: version check'
+    Ui-Item '11' 'Exit'
+    Ui-Bottom
+    $c = Read-Host "`nEnter Number Of List"
     switch ($c) {
       '1' { Show-Status }
       '2' {
@@ -346,6 +406,7 @@ function Show-Menu {
       '11' { Write-Host 'bye.'; return }
       default { Write-Host 'please choose 1-11.' }
     }
+    $null = Read-Host "`nPress Enter to continue"
   }
 }
 
