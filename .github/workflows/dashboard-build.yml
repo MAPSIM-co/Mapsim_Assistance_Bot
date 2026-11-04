@@ -19,7 +19,7 @@ defaults:
 
 jobs:
   build:
-    name: ${{ matrix.label }}
+    name: ${{ matrix.variant }} ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,15 +28,59 @@ jobs:
           - os: macos-latest
             label: macos-arm64
             zip: MapsimDashboard-macos-arm64.zip
+            variant: licensed
+            source_ref: main
+            licensed: 1
+            artifact_name: MapsimDashboard
           - os: macos-15-intel
             label: macos-x64
             zip: MapsimDashboard-macos-x64.zip
+            variant: licensed
+            source_ref: main
+            licensed: 1
+            artifact_name: MapsimDashboard
           - os: windows-latest
             label: windows-x64
             zip: MapsimDashboard-windows-x64.zip
+            variant: licensed
+            source_ref: main
+            licensed: 1
+            artifact_name: MapsimDashboard
           - os: ubuntu-22.04
             label: linux-x64
             zip: MapsimDashboard-linux-x64.tar.gz
+            variant: licensed
+            source_ref: main
+            licensed: 1
+            artifact_name: MapsimDashboard
+          - os: macos-latest
+            label: macos-arm64
+            zip: MapsimDashboardFree-macos-arm64.zip
+            variant: free
+            source_ref: free
+            licensed: 0
+            artifact_name: MapsimDashboardFree
+          - os: macos-15-intel
+            label: macos-x64
+            zip: MapsimDashboardFree-macos-x64.zip
+            variant: free
+            source_ref: free
+            licensed: 0
+            artifact_name: MapsimDashboardFree
+          - os: windows-latest
+            label: windows-x64
+            zip: MapsimDashboardFree-windows-x64.zip
+            variant: free
+            source_ref: free
+            licensed: 0
+            artifact_name: MapsimDashboardFree
+          - os: ubuntu-22.04
+            label: linux-x64
+            zip: MapsimDashboardFree-linux-x64.tar.gz
+            variant: free
+            source_ref: free
+            licensed: 0
+            artifact_name: MapsimDashboardFree
 
     steps:
       - name: Checkout repository
@@ -48,6 +92,7 @@ jobs:
         with:
           repository: ${{ vars.SOURCE_REPO }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          ref: ${{ matrix.source_ref }}
           path: source
           fetch-depth: 1
           persist-credentials: false
@@ -85,6 +130,7 @@ jobs:
           python -m pip install -r requirements-build.txt
 
       - name: Create a short-lived smoke-test license
+        if: matrix.licensed == 1
         shell: bash
         run: |
           set -euo pipefail
@@ -163,7 +209,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python build.py --source "$SOURCE_DIR" --out dist --name MapsimDashboard
+          args=(--source "$SOURCE_DIR" --out dist --name "${{ matrix.artifact_name }}")
+          if [ "${{ matrix.licensed }}" != "1" ]; then args+=(--license-free); fi
+          python build.py "${args[@]}"
 
       - name: Sign Windows binary
         if: runner.os == 'Windows' && steps.signing.outputs.windows == '1'
@@ -175,7 +223,7 @@ jobs:
             Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw "signtool.exe not found" }
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-            /f "$env:PFX_PATH" /p "$env:PFX_PASSWORD" "dist\MapsimDashboard.exe"
+            /f "$env:PFX_PATH" /p "$env:PFX_PASSWORD" "dist\${{ matrix.artifact_name }}.exe"
 
       - name: Notarize macOS app
         if: runner.os == 'macOS' && steps.signing.outputs.macos == '1'
@@ -186,22 +234,27 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
-          ditto -c -k --keepParent "dist/MapsimDashboard.app" "$RUNNER_TEMP/notarize.zip"
+          ditto -c -k --keepParent "dist/${{ matrix.artifact_name }}.app" "$RUNNER_TEMP/notarize.zip"
           xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-          xcrun stapler staple "dist/MapsimDashboard.app"
-          xcrun stapler validate "dist/MapsimDashboard.app"
+          xcrun stapler staple "dist/${{ matrix.artifact_name }}.app"
+          xcrun stapler validate "dist/${{ matrix.artifact_name }}.app"
 
       - name: Smoke test
         shell: bash
         run: |
           set -euo pipefail
+          name="${{ matrix.artifact_name }}"
           case "${{ runner.os }}" in
-            macOS) artifact="dist/MapsimDashboard.app" ;;
-            Windows) artifact="dist/MapsimDashboard.exe" ;;
-            *) artifact="dist/MapsimDashboard" ;;
+            macOS) artifact="dist/$name.app" ;;
+            Windows) artifact="dist/$name.exe" ;;
+            *) artifact="dist/$name" ;;
           esac
-          python smoke_test.py --artifact "$artifact" --license-file .smoke/license --auth-file .smoke/auth
+          if [ "${{ matrix.licensed }}" = "1" ]; then
+            python smoke_test.py --artifact "$artifact" --license-file .smoke/license --auth-file .smoke/auth
+          else
+            python smoke_test.py --artifact "$artifact" --license-free
+          fi
 
       - name: Remove the smoke-test license
         if: always()
@@ -214,14 +267,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package
-          ditto -c -k --keepParent "dist/MapsimDashboard.app" "package/${{ matrix.zip }}"
+          ditto -c -k --keepParent "dist/${{ matrix.artifact_name }}.app" "package/${{ matrix.zip }}"
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package | Out-Null
-          Compress-Archive -Path "dist\MapsimDashboard.exe" -DestinationPath "package\${{ matrix.zip }}" -Force
+          Compress-Archive -Path "dist\${{ matrix.artifact_name }}.exe" -DestinationPath "package\${{ matrix.zip }}" -Force
 
       - name: Package Linux artifact
         if: runner.os == 'Linux'
@@ -229,7 +282,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package
-          tar -C dist -czf "package/${{ matrix.zip }}" MapsimDashboard
+          tar -C dist -czf "package/${{ matrix.zip }}" "${{ matrix.artifact_name }}"
 
       - name: Write checksum
         shell: bash
@@ -251,7 +304,7 @@ jobs:
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.label }}
+          name: ${{ matrix.variant }}-${{ matrix.label }}
           path: Dashboard_Release/package/*
           if-no-files-found: error
 
@@ -261,15 +314,42 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download builds
+      - name: Download licensed builds
         uses: actions/download-artifact@v4
         with:
+          pattern: licensed-*
           path: release
           merge-multiple: true
 
-      - name: Publish GitHub release
+      - name: Download free builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: free-*
+          path: release-free
+          merge-multiple: true
+
+      - name: Publish GitHub release (licensed V6)
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
           generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Resolve the free-build tag name
+        id: free_tag
+        shell: bash
+        run: echo "tag=${GITHUB_REF_NAME/dashboard-v/dashboard-free-v}" >> "$GITHUB_OUTPUT"
+
+      # The license-free build is stored as an unpublished draft: only the
+      # repository owner can see or download it until it is published on purpose.
+      - name: Hold the license-free build as a draft
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.free_tag.outputs.tag }}
+          name: "License-free build ${{ github.ref_name }} (held back)"
+          body: |
+            License-free dashboard build. It is intentionally unpublished and
+            must stay a draft until the owner authorizes public distribution.
+          files: release-free/*
+          draft: true
           fail_on_unmatched_files: true

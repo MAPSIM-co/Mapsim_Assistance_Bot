@@ -129,16 +129,20 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifact", required=True, help="built .app, .exe or executable")
     parser.add_argument("--timeout", type=float, default=90.0, help="seconds to wait for the API")
-    parser.add_argument("--license-file", required=True, help="license file for the app (it refuses to start without one)")
-    parser.add_argument("--auth-file", required=True, help="username/password file used to sign in")
+    parser.add_argument("--license-file", help="license file for the licensed build")
+    parser.add_argument("--auth-file", help="username/password file used to sign in")
+    parser.add_argument("--license-free", action="store_true", help="test a license-free build (no license or login)")
     args = parser.parse_args()
 
+    if not args.license_free and (not args.license_file or not args.auth_file):
+        parser.error("--license-file and --auth-file are required unless --license-free is used")
+
     executable = resolve_executable(Path(args.artifact).expanduser().resolve())
-    license_file = Path(args.license_file).expanduser().resolve()
-    auth_file = Path(args.auth_file).expanduser().resolve()
-    if not license_file.is_file():
+    license_file = Path(args.license_file).expanduser().resolve() if args.license_file else None
+    auth_file = Path(args.auth_file).expanduser().resolve() if args.auth_file else None
+    if license_file is not None and not license_file.is_file():
         raise SystemExit(f"license file not found: {license_file}")
-    authorization = read_auth(auth_file)
+    authorization = "" if args.license_free else read_auth(auth_file)
 
     port = free_port()
     env = os.environ.copy()
@@ -151,11 +155,9 @@ def main() -> int:
         "--no-browser",
         "--port",
         str(port),
-        "--license-file",
-        str(license_file),
-        "--auth-file",
-        str(auth_file),
     ]
+    if not args.license_free:
+        command.extend(["--license-file", str(license_file), "--auth-file", str(auth_file)])
     print("starting:", " ".join(command))
     process = subprocess.Popen(
         command,

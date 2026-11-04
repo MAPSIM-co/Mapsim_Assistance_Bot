@@ -19,7 +19,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-SOURCE_FILES = ("live_dashboard.py", "market_engine.py", "mock_feed.py", "news_feed.py", "license_gate.py")
+SOURCE_FILES = ("live_dashboard.py", "market_engine.py", "mock_feed.py", "news_feed.py")
+LICENSE_FILE = "license_gate.py"
 SOURCE_DIRS = ("web", "Logo")
 SOURCE_EXTRA = ("runtime/candles_sampled.json",)
 ENTRY_FILE = HERE / "entry.py"
@@ -48,10 +49,12 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def source_manifest(source: Path) -> list[Path]:
+def source_manifest(source: Path, license_free: bool = False) -> list[Path]:
     files: list[Path] = []
     for name in SOURCE_FILES:
         files.append(source / name)
+    if not license_free:
+        files.append(source / LICENSE_FILE)
     for name in SOURCE_DIRS:
         folder = source / name
         if folder.is_dir():
@@ -61,20 +64,20 @@ def source_manifest(source: Path) -> list[Path]:
     return files
 
 
-def validate_source(source: Path) -> None:
+def validate_source(source: Path, license_free: bool = False) -> None:
     if not source.is_dir():
         raise BuildError(f"source folder not found: {source}")
-    missing = [str(path.relative_to(source)) for path in source_manifest(source) if not path.is_file()]
+    missing = [str(path.relative_to(source)) for path in source_manifest(source, license_free) if not path.is_file()]
     if missing:
         raise BuildError(
             "source is missing required files:\n  " + "\n  ".join(sorted(missing))
         )
 
 
-def snapshot_hashes(source: Path) -> dict[str, str]:
+def snapshot_hashes(source: Path, license_free: bool = False) -> dict[str, str]:
     return {
         str(path.relative_to(source)): sha256_file(path)
-        for path in source_manifest(source)
+        for path in source_manifest(source, license_free)
     }
 
 
@@ -86,11 +89,13 @@ def is_allowed_asset(path: Path, allowed: set[str]) -> bool:
     return path.suffix.lower() in allowed
 
 
-def copy_whitelist(source: Path, stage: Path) -> None:
+def copy_whitelist(source: Path, stage: Path, license_free: bool = False) -> None:
     stage.mkdir(parents=True, exist_ok=True)
 
     for name in SOURCE_FILES:
         shutil.copy2(source / name, stage / name)
+    if not license_free:
+        shutil.copy2(source / LICENSE_FILE, stage / LICENSE_FILE)
     shutil.copy2(ENTRY_FILE, stage / "entry.py")
 
     for name, allowed in (("web", WEB_EXTENSIONS), ("Logo", LOGO_EXTENSIONS)):
@@ -240,6 +245,7 @@ def main() -> int:
     parser.add_argument("--source", required=True, help="path to the private dashboard source folder")
     parser.add_argument("--out", default=str(HERE / "dist"), help="output folder (default: ./dist)")
     parser.add_argument("--name", default="MapsimDashboard", help="artifact name")
+    parser.add_argument("--license-free", action="store_true", help="build the license-free variant (no license_gate.py)")
     parser.add_argument("--console", action="store_true", help="keep the console window (debugging only)")
     parser.add_argument("--icon", default=None, help="optional .ico/.icns/.png icon")
     parser.add_argument("--keep-stage", action="store_true", help="keep the staging folder for inspection")
@@ -258,8 +264,9 @@ def main() -> int:
     stage = build_root / "stage"
     work = build_root / "work"
 
-    validate_source(source)
-    before = snapshot_hashes(source)
+    license_free = args.license_free
+    validate_source(source, license_free)
+    before = snapshot_hashes(source, license_free)
 
     if (source / "sftp.evd").exists():
         print("note: sftp.evd is present in the source and will NOT be bundled")
@@ -270,7 +277,7 @@ def main() -> int:
     dist.mkdir(parents=True, exist_ok=True)
 
     try:
-        copy_whitelist(source, stage)
+        copy_whitelist(source, stage, license_free)
         assert_clean(stage)
         print(f"staged {sum(1 for _ in stage.rglob('*') if _.is_file())} files in {stage}")
 
@@ -290,7 +297,7 @@ def main() -> int:
         digest = sha256_file(executable)
         (dist / "SHA256SUMS").write_text(f"{digest}  {executable.name}\n", encoding="utf-8")
 
-        after = snapshot_hashes(source)
+        after = snapshot_hashes(source, license_free)
         if before != after:
             changed = sorted(name for name in before if before[name] != after.get(name))
             raise BuildError("source files changed during the build: " + ", ".join(changed))
