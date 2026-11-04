@@ -134,6 +134,37 @@ http_code() {
   curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1/healthz" 2>/dev/null || echo 000
 }
 
+# Run the dashboard binary for a short check without ever blocking the menu.
+# When no license file is readable the binary asks on stdin for one; with stdin
+# closed it fails fast, and the watchdog stops a build that ignores the flag.
+binary_check() {
+  _bc_wait=$1
+  shift
+  "$BINARY" "$@" </dev/null >/dev/null 2>&1 &
+  _bc_pid=$!
+  _bc_n=0
+  _bc_limit=$((_bc_wait * 4))
+  while [ "$_bc_n" -lt "$_bc_limit" ]; do
+    if ! kill -0 "$_bc_pid" 2>/dev/null; then
+      wait "$_bc_pid" 2>/dev/null || true
+      return 0
+    fi
+    sleep 0.25
+    _bc_n=$((_bc_n + 1))
+  done
+  kill -TERM "$_bc_pid" 2>/dev/null || true
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -TERM -P "$_bc_pid" 2>/dev/null || true
+  fi
+  sleep 0.5
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -KILL -P "$_bc_pid" 2>/dev/null || true
+  fi
+  kill -KILL "$_bc_pid" 2>/dev/null || true
+  wait "$_bc_pid" 2>/dev/null || true
+  return 124
+}
+
 # True when a port has a listener (anything at all).
 port_listening() {
   if command -v ss >/dev/null 2>&1; then
@@ -542,11 +573,11 @@ license_run() {
   snap=$(current_snapshot)
   [ -z "$snap" ] && snap=$(find_snapshot)
   if [ -n "$snap" ] && [ -f "$snap" ]; then
-    "$BINARY" --license-check --license-file "$1" --auth-file "$2" \
-      --file "$snap" --no-browser --license-out "$3" >/dev/null 2>&1
+    binary_check 20 --license-check --license-file "$1" --auth-file "$2" \
+      --file "$snap" --no-browser --license-out "$3"
   else
-    "$BINARY" --license-check --license-file "$1" --auth-file "$2" \
-      --no-browser --license-out "$3" >/dev/null 2>&1
+    binary_check 20 --license-check --license-file "$1" --auth-file "$2" \
+      --no-browser --license-out "$3"
   fi
   return 0
 }
@@ -555,9 +586,8 @@ license_run() {
 license_supported() {
   [ -x "$BINARY" ] || return 1
   out=$(license_tmp) || return 1
-  "$BINARY" --license-check --license-file "/nonexistent/mapsim.license" \
-    --auth-file "/nonexistent/mapsim.auth" --no-browser --license-out "$out" \
-    >/dev/null 2>&1 || true
+  binary_check 20 --license-check --license-file "/nonexistent/mapsim.license" \
+    --auth-file "/nonexistent/mapsim.auth" --no-browser --license-out "$out" || true
   found=0
   grep -q '^status=' "$out" 2>/dev/null && found=1
   rm -f "$out"
