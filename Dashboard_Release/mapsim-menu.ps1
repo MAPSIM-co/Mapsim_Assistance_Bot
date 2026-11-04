@@ -780,6 +780,17 @@ function Show-Menu {
     Ui-Top
     Ui-Row 'Dashboard' $stPlain $stCol
     Ui-Row 'App' $appPlain $appCol
+    if (Test-ServiceInstalled) {
+      $svcState = 'enabled'; if (-not (Test-ServiceEnabled)) { $svcState = 'disabled' }
+      $svcRun = 'stopped'; if (Test-ServiceRunning) { $svcRun = 'running' }
+      $svcPlain = "installed, $svcState, $svcRun"
+      if ($svcRun -eq 'running') { $svcCol = $Green + $svcPlain + $NoColor }
+      else { $svcCol = $Yellow + $svcPlain + $NoColor }
+    } else {
+      $svcPlain = 'not installed'
+      $svcCol = $Yellow + $svcPlain + $NoColor
+    }
+    Ui-Row 'Service' $svcPlain $svcCol
     Ui-Row 'Expert' $eaPlain $eaCol
     if (Test-LicenseSaved) { $licPlain = 'saved'; $licCol = $Green + $licPlain + $NoColor }
     else { $licPlain = 'not set'; $licCol = $Red + $licPlain + $NoColor }
