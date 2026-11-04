@@ -2223,11 +2223,25 @@ menu_main() {
       lic_plain="not set"
       lic_col="${RED}$lic_plain${NC}"
     fi
+    if service_installed; then
+      if service_enabled; then svc_state="enabled"; else svc_state="disabled"; fi
+      if service_running; then svc_run="running"; else svc_run="stopped"; fi
+      svc_plain="installed, $svc_state, $svc_run"
+      if [ "$svc_run" = "running" ]; then
+        svc_col="${GREEN}$svc_plain${NC}"
+      else
+        svc_col="${YELLOW}$svc_plain${NC}"
+      fi
+    else
+      svc_plain="not installed"
+      svc_col="${YELLOW}$svc_plain${NC}"
+    fi
 
     show_title
     ui_top
     ui_row "Dashboard" "$st_plain" "$st"
     ui_row "App" "$app_plain" "$app"
+    ui_row "Service" "$svc_plain" "$svc_col"
     ui_row "Expert" "$ea_plain" "$ea"
     ui_row "License" "$lic_plain" "$lic_col"
     ui_row "Access" "$acc" "${CYAN}$acc${NC}"
