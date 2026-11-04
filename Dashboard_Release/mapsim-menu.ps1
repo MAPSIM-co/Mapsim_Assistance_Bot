@@ -22,7 +22,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
-$FallbackVersion = 'dashboard-v1.0.2'
+$FallbackVersion = 'dashboard-v1.0.3'
 $AppDir = Join-Path $env:LOCALAPPDATA 'MapsimDashboard'
 $Binary = Join-Path $AppDir 'MapsimDashboard.exe'
 $MenuPath = Join-Path $AppDir 'mapsim-menu.ps1'
