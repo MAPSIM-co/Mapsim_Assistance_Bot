@@ -5,6 +5,9 @@ on:
   push:
     tags:
       - "dashboard-v*"
+      # Pushing this tag rebuilds only the license-free variant and refreshes
+      # the held-back draft, e.g. when the licensed release is already done.
+      - "dashboard-free-v*"
 
 permissions:
   contents: write
@@ -310,11 +313,17 @@ jobs:
 
   release:
     name: publish release
-    if: startsWith(github.ref, 'refs/tags/dashboard-v')
+    if: startsWith(github.ref, 'refs/tags/dashboard-')
     needs: build
     runs-on: ubuntu-latest
+    # This job never checks out the repository, so the global Dashboard_Release
+    # working directory does not exist here. Run steps use the workspace root.
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Download licensed builds
+        if: startsWith(github.ref_name, 'dashboard-v')
         uses: actions/download-artifact@v4
         with:
           pattern: licensed-*
@@ -329,19 +338,29 @@ jobs:
           merge-multiple: true
 
       - name: Publish GitHub release (licensed V6)
+        if: startsWith(github.ref_name, 'dashboard-v')
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
           generate_release_notes: true
           fail_on_unmatched_files: true
 
-      - name: Resolve the free-build tag name
-        id: free_tag
-        shell: bash
-        run: echo "tag=${GITHUB_REF_NAME/dashboard-v/dashboard-free-v}" >> "$GITHUB_OUTPUT"
-
       # The license-free build is stored as an unpublished draft: only the
       # repository owner can see or download it until it is published on purpose.
+      - name: Resolve the held-back tag name
+        id: free_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            # dashboard-v1.0.3 -> dashboard-free-v1.0.3; a dashboard-free-v1.0.3
+            # tag is already the draft tag and passes through unchanged.
+            dashboard-free-v*) tag="$GITHUB_REF_NAME" ;;
+            dashboard-v*) tag="${GITHUB_REF_NAME/dashboard-v/dashboard-free-v}" ;;
+            *) echo "::error::Unexpected tag $GITHUB_REF_NAME"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Hold the license-free build as a draft
         uses: softprops/action-gh-release@v2
         with:
