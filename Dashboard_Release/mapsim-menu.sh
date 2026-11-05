@@ -13,7 +13,7 @@
 set -u
 
 REPO="MAPSIM-co/Mapsim_Assistance_Bot"
-FALLBACK_VERSION="dashboard-v1.0.4"
+FALLBACK_VERSION="dashboard-v1.0.5"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
 CONFIG_DIR="$HOME/.config/mapsim-dashboard"
