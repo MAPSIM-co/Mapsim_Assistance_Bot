@@ -38,6 +38,13 @@ $TaskName = 'MapsimDashboard'
 $LicenseDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.mapsim'
 $LicenseFile = Join-Path $LicenseDir 'dashboard.license'
 $LicenseAuthFile = Join-Path $LicenseDir 'dashboard.auth'
+$VersionFile = Join-Path $ConfigDir 'dashboard.version'
+$UpdatePolicyFile = Join-Path $ConfigDir 'update-policy'
+$UpdateCacheFile = Join-Path $ConfigDir 'update-cache.json'
+$UpdateCacheTtl = 21600
+$script:UpdateInstalled = ''
+$script:UpdateLatest = ''
+$script:UpdateAvailable = $false
 
 function Test-Installed { Test-Path $Binary }
 
@@ -371,7 +378,9 @@ function Install-Dashboard {
   }
   Install-Self
   Write-Shim
-  Write-Host "installed: $AppDir"
+  New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+  Set-Content -Path $VersionFile -Value ($ver -replace '^dashboard-v', '') -Encoding ASCII
+  Write-Host "installed: $AppDir ($($ver -replace '^dashboard-v', ''))"
   if ($hadService) {
     Start-ServiceTask
     Write-Host 'auto-start task started again with the new version.'
@@ -542,6 +551,19 @@ function Show-Disk {
 function Show-Status {
   Write-Host "system    : Windows x64"
   if (Test-Installed) { Write-Host "app       : installed ($AppDir)" } else { Write-Host 'app       : not installed' }
+  $ver = Get-InstalledVersion
+  if ($ver) {
+    $latestTag = Get-LatestDashboardTag
+    $latestPlain = ''
+    if ($latestTag) { $latestPlain = $latestTag -replace '^dashboard-v', '' }
+    if ($latestPlain -and (Test-NewerDashboardVersion $latestPlain $ver)) {
+      Write-Host "version   : $ver (update $latestPlain available - menu 4)"
+    } else {
+      Write-Host "version   : $ver"
+    }
+  } else {
+    Write-Host 'version   : unknown'
+  }
   $id = Get-DashboardPid
   if ($id) { Write-Host "dashboard : RUNNING (pid $id)" } else { Write-Host 'dashboard : stopped' }
   $port = Get-CurrentPort
@@ -574,6 +596,133 @@ function Show-Status {
     Write-Host "service   : installed, $stateText, $runText"
   } else {
     Write-Host 'service   : not installed'
+  }
+}
+
+# ---------------------------------------------------------------- dashboard version / updates
+
+function Get-InstalledVersion {
+  if (Test-Path $VersionFile) {
+    $v = (Get-Content $VersionFile -Raw).Trim()
+    if ($v) { return $v }
+  }
+  # Builds installed before the version file existed report it themselves.
+  if (Test-Path $Binary) {
+    try {
+      $out = & $Binary --version 2>$null
+      if ($out -match '(\d+(?:\.\d+)+)') {
+        $v = $Matches[1]
+        New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+        Set-Content -Path $VersionFile -Value $v -Encoding ASCII
+        return $v
+      }
+    } catch { }
+  }
+  return ''
+}
+
+# Newest licensed release tag, cached for 6 hours so the menu starts fast.
+function Get-LatestDashboardTag {
+  if (Test-Path $UpdateCacheFile) {
+    try {
+      $cache = Get-Content $UpdateCacheFile -Raw | ConvertFrom-Json
+      $age = [DateTimeOffset]::Now.ToUnixTimeSeconds() - [int64]$cache.checked
+      if ($age -ge 0 -and $age -lt $UpdateCacheTtl -and $cache.tag) { return [string]$cache.tag }
+    } catch { }
+  }
+  try {
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=50" -TimeoutSec 8
+    $tag = ($rel | Where-Object { -not $_.draft -and -not $_.prerelease -and $_.tag_name -match '^dashboard-v\d' } | Select-Object -First 1).tag_name
+    if ($tag) {
+      New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+      @{ checked = [DateTimeOffset]::Now.ToUnixTimeSeconds(); tag = $tag } | ConvertTo-Json | Set-Content -Path $UpdateCacheFile -Encoding ASCII
+      return [string]$tag
+    }
+  } catch { }
+  return ''
+}
+
+function Test-NewerDashboardVersion([string]$Latest, [string]$Installed) {
+  if (-not $Latest -or -not $Installed) { return $false }
+  try {
+    return ([version]$Latest) -gt ([version]$Installed)
+  } catch {
+    return $false
+  }
+}
+
+function Get-UpdatePolicy {
+  if (Test-Path $UpdatePolicyFile) {
+    $p = (Get-Content $UpdatePolicyFile -Raw).Trim()
+    if ($p -in @('auto', 'notify', 'off')) { return $p }
+  }
+  return 'notify'
+}
+
+function Set-UpdatePolicy([string]$Policy) {
+  New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+  Set-Content -Path $UpdatePolicyFile -Value $Policy -Encoding ASCII
+}
+
+function Update-Refresh {
+  $script:UpdateInstalled = Get-InstalledVersion
+  $latestTag = Get-LatestDashboardTag
+  $script:UpdateLatest = ''
+  if ($latestTag) { $script:UpdateLatest = $latestTag -replace '^dashboard-v', '' }
+  $script:UpdateAvailable = $false
+  if ($script:UpdateLatest -and $script:UpdateInstalled -and (Test-NewerDashboardVersion $script:UpdateLatest $script:UpdateInstalled)) {
+    $script:UpdateAvailable = $true
+  }
+}
+
+function Invoke-StartupUpdateCheck {
+  $policy = Get-UpdatePolicy
+  if ($policy -eq 'off') { return }
+  Update-Refresh
+  if (-not $script:UpdateAvailable) { return }
+  if ($policy -eq 'auto') {
+    Write-Host ''
+    Write-Host "automatic update: $($script:UpdateInstalled) -> $($script:UpdateLatest)" -ForegroundColor Yellow
+    $previousVersion = $Version
+    $script:Version = "dashboard-v$($script:UpdateLatest)"
+    try { Install-Dashboard } catch { Write-Host "automatic update failed: $($_.Exception.Message)" -ForegroundColor Red }
+    $script:Version = $previousVersion
+    Update-Refresh
+    $null = Read-Host 'Press Enter to open the menu'
+    return
+  }
+  Write-Host ''
+  Write-Host "dashboard update available: $($script:UpdateInstalled) -> $($script:UpdateLatest) (menu 4 installs it)" -ForegroundColor Yellow
+}
+
+function Show-UpdatePolicyMenu {
+  while ($true) {
+    Clear-Host
+    $cur = Get-UpdatePolicy
+    Write-Host ''
+    Write-Host 'dashboard updates'
+    Write-Host "  current policy: $cur"
+    Write-Host ''
+    Write-Host '  1) notify - check when the menu starts and tell me (default)'
+    Write-Host '  2) auto   - install a new version automatically when the menu starts'
+    Write-Host '  3) off    - never check for updates'
+    Write-Host '  4) check now'
+    $a = Read-Host 'choose 1-4 (0 = back)'
+    if ($a -eq '0') { return }
+    switch ($a) {
+      '1' { Set-UpdatePolicy 'notify'; Write-Host 'policy: notify.' }
+      '2' { Set-UpdatePolicy 'auto'; Write-Host 'policy: auto - a new release installs at menu start.' }
+      '3' { Set-UpdatePolicy 'off'; Write-Host 'policy: off.' }
+      '4' {
+        Update-Refresh
+        if (-not $script:UpdateLatest) { Write-Host 'could not reach GitHub (offline or rate limited).' -ForegroundColor Yellow }
+        elseif ($script:UpdateAvailable) { Write-Host "update available: $($script:UpdateInstalled) -> $($script:UpdateLatest) (menu 4 installs it)" -ForegroundColor Yellow }
+        elseif ($script:UpdateInstalled) { Write-Host "dashboard is up to date ($($script:UpdateInstalled))." -ForegroundColor Green }
+        else { Write-Host "latest release: $($script:UpdateLatest)" }
+      }
+      default { Write-Host 'please choose 1-4.' }
+    }
+    $null = Read-Host 'Press Enter to continue'
   }
 }
 
@@ -751,6 +900,7 @@ function Show-ServiceMenu {
 }
 
 function Show-Menu {
+  Invoke-StartupUpdateCheck
   while ($true) {
     Clear-Host
     $id = Get-DashboardPid
@@ -780,6 +930,19 @@ function Show-Menu {
     Ui-Top
     Ui-Row 'Dashboard' $stPlain $stCol
     Ui-Row 'App' $appPlain $appCol
+    $verPlain = Get-InstalledVersion
+    if ($verPlain) {
+      if ($script:UpdateAvailable -and $script:UpdateLatest) {
+        $verPlain = "$verPlain  (update $($script:UpdateLatest) available - menu 4)"
+        $verCol = $Yellow + $verPlain + $NoColor
+      } else {
+        $verCol = $Green + $verPlain + $NoColor
+      }
+    } else {
+      $verPlain = 'unknown'
+      $verCol = $Yellow + $verPlain + $NoColor
+    }
+    Ui-Row 'Version' $verPlain $verCol
     if (Test-ServiceInstalled) {
       $svcState = 'enabled'; if (-not (Test-ServiceEnabled)) { $svcState = 'disabled' }
       $svcRun = 'stopped'; if (Test-ServiceRunning) { $svcRun = 'running' }
@@ -810,7 +973,8 @@ function Show-Menu {
     Ui-Item '10' 'Expert Advisor: version check'
     Ui-Item '11' 'Disk space / server storage'
     Ui-Item '12' 'License (dashboard login)'
-    Ui-Item '13' 'Exit'
+    Ui-Item '13' 'Update policy (notify / auto / off)'
+    Ui-Item '14' 'Exit'
     Ui-Bottom
     $c = Read-Host "`nEnter Number Of List"
     switch ($c) {
@@ -880,8 +1044,9 @@ function Show-Menu {
       '10' { Show-EaStatus }
       '11' { Show-Disk }
       '12' { Show-LicenseMenu }
-      '13' { Write-Host 'bye.'; return }
-      default { Write-Host 'please choose 1-13.' }
+      '13' { Show-UpdatePolicyMenu }
+      '14' { Write-Host 'bye.'; return }
+      default { Write-Host 'please choose 1-14.' }
     }
     $null = Read-Host "`nPress Enter to continue"
   }

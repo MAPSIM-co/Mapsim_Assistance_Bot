@@ -25,6 +25,14 @@ LOG_FILE="$CONFIG_DIR/dashboard.log"
 # size only the newest lines are kept. 256 KB holds thousands of startup lines.
 LOG_MAX_BYTES=262144
 LOG_KEEP_LINES=200
+VERSION_FILE="$CONFIG_DIR/dashboard.version"
+UPDATE_POLICY_FILE="$CONFIG_DIR/update-policy"
+UPDATE_CACHE_FILE="$CONFIG_DIR/update-cache"
+UPDATE_CACHE_TTL=21600
+UPDATE_HTTP_TIMEOUT=6
+UPDATE_INSTALLED=""
+UPDATE_LATEST=""
+UPDATE_AVAILABLE=0
 WRAPPER="$HOME/.local/bin/mapsim-dashboard"
 LICENSE_DIR="$HOME/.mapsim"
 LICENSE_FILE="$LICENSE_DIR/dashboard.license"
@@ -928,6 +936,166 @@ install_self() {
   chmod +x "$MENU_DEST"
 }
 
+# ---------------------------------------------------------------- dashboard version / updates
+
+normalize_version() {
+  v=${1:-}
+  v=${v#dashboard-free-v}
+  v=${v#dashboard-v}
+  printf '%s\n' "$v"
+}
+
+# Version of the installed build: the state file written at install time, or the
+# binary itself (a windowed Windows build has no stdout, hence the state file).
+installed_version() {
+  if [ -f "$VERSION_FILE" ]; then
+    v=$(tr -d ' \t\r\n' < "$VERSION_FILE" 2>/dev/null || true)
+    if [ -n "${v:-}" ]; then
+      printf '%s\n' "$v"
+      return 0
+    fi
+  fi
+  if [ -x "$BINARY" ]; then
+    v=$("$BINARY" --version 2>/dev/null | head -n 1 | grep -o '[0-9][0-9.]*' | head -n 1 || true)
+    if [ -n "${v:-}" ]; then
+      printf '%s\n' "$v"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# Newest licensed release tag, cached for 6 hours so the menu starts fast.
+latest_version() {
+  now=$(date +%s 2>/dev/null || echo 0)
+  if [ -f "$UPDATE_CACHE_FILE" ]; then
+    ts=$(cut -d' ' -f1 "$UPDATE_CACHE_FILE" 2>/dev/null || true)
+    tag=$(cut -d' ' -f2 "$UPDATE_CACHE_FILE" 2>/dev/null || true)
+    case "${ts:-}" in ''|*[!0-9]*) ts=0 ;; esac
+    age=$((now - ts))
+    if [ -n "${tag:-}" ] && [ "$ts" -gt 0 ] && [ "$age" -ge 0 ] && [ "$age" -lt "$UPDATE_CACHE_TTL" ]; then
+      normalize_version "$tag"
+      return 0
+    fi
+  fi
+  raw=$(curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" \
+    "https://api.github.com/repos/$REPO/releases?per_page=50" 2>/dev/null || true)
+  tag=$(printf '%s\n' "$raw" | grep -o '"tag_name": *"dashboard-v[0-9][^"]*"' | head -n 1 \
+    | sed 's/.*"\(dashboard-v[^"]*\)"/\1/' || true)
+  if [ -z "${tag:-}" ]; then
+    return 1
+  fi
+  mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+  printf '%s %s\n' "$now" "$tag" > "$UPDATE_CACHE_FILE" 2>/dev/null || true
+  normalize_version "$tag"
+}
+
+# True when version A is newer than version B.
+version_gt() {
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    na = split(a, A, "."); nb = split(b, B, ".");
+    n = (na > nb ? na : nb);
+    for (i = 1; i <= n; i++) {
+      x = (i <= na ? A[i] : 0) + 0; y = (i <= nb ? B[i] : 0) + 0;
+      if (x > y) exit 0;
+      if (x < y) exit 1;
+    }
+    exit 1;
+  }'
+}
+
+update_policy() {
+  p=""
+  if [ -f "$UPDATE_POLICY_FILE" ]; then
+    p=$(tr -d ' \t\r\n' < "$UPDATE_POLICY_FILE" 2>/dev/null || true)
+  fi
+  case "${p:-}" in
+    auto|notify|off) printf '%s\n' "$p" ;;
+    *) printf 'notify\n' ;;
+  esac
+}
+
+set_update_policy() {
+  mkdir -p "$CONFIG_DIR"
+  printf '%s\n' "$1" > "$UPDATE_POLICY_FILE"
+}
+
+update_refresh() {
+  UPDATE_INSTALLED=$(installed_version || true)
+  UPDATE_LATEST=$(latest_version || true)
+  UPDATE_AVAILABLE=0
+  if [ -n "${UPDATE_LATEST:-}" ] && [ -n "${UPDATE_INSTALLED:-}" ] \
+     && version_gt "$UPDATE_LATEST" "$UPDATE_INSTALLED"; then
+    UPDATE_AVAILABLE=1
+  fi
+}
+
+update_check_now() {
+  update_refresh
+  if [ -z "${UPDATE_LATEST:-}" ]; then
+    msg_warn "could not reach GitHub (offline or rate limited)."
+  elif [ "$UPDATE_AVAILABLE" -eq 1 ]; then
+    msg_warn "update available: $UPDATE_INSTALLED -> $UPDATE_LATEST (menu 4 installs it)"
+  elif [ -n "${UPDATE_INSTALLED:-}" ]; then
+    msg_ok "dashboard is up to date ($UPDATE_INSTALLED)."
+  else
+    msg_info "latest release: $UPDATE_LATEST (the dashboard is not installed yet)."
+  fi
+}
+
+# Runs once per menu session; honours the stored policy.
+update_startup() {
+  policy=$(update_policy)
+  [ "$policy" = "off" ] && return 0
+  update_refresh
+  if [ -z "${UPDATE_LATEST:-}" ] || [ "$UPDATE_AVAILABLE" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$policy" = "auto" ]; then
+    echo ""
+    msg_warn "automatic update: $UPDATE_INSTALLED -> $UPDATE_LATEST"
+    WANT_VERSION="dashboard-v$UPDATE_LATEST"
+    download_and_install
+    unset WANT_VERSION
+    update_refresh
+    printf '%s' "press Enter to open the menu..."
+    IFS= read -r _ || true
+    echo ""
+    return 0
+  fi
+  echo ""
+  msg_warn "dashboard update available: $UPDATE_INSTALLED -> $UPDATE_LATEST (menu 4 installs it)"
+}
+
+menu_update_policy() {
+  while true; do
+    if [ -t 1 ]; then clear; fi
+    cur=$(update_policy)
+    echo ""
+    echo "dashboard updates"
+    echo "  current policy: $cur"
+    echo ""
+    echo "  1) notify - check when the menu starts and tell me (default)"
+    echo "  2) auto   - install a new version automatically when the menu starts"
+    echo "  3) off    - never check for updates"
+    echo "  4) check now"
+    a=$(ask "choose 1-4 (0 = back)")
+    if wants_back "$a"; then
+      echo "back to the main menu."
+      return
+    fi
+    case "$a" in
+      1) set_update_policy notify; echo "policy: notify." ;;
+      2) set_update_policy auto; echo "policy: auto - a new release installs at menu start." ;;
+      3) set_update_policy off; echo "policy: off." ;;
+      4) update_check_now ;;
+      *) echo "please choose 1-4." ;;
+    esac
+    printf '%s' "press Enter to continue..."
+    IFS= read -r _ || { echo ""; return; }
+  done
+}
+
 # ---------------------------------------------------------------- install
 
 detect_version() {
@@ -1008,10 +1176,12 @@ EOF
   fi
   rm -rf "$tmp"
   trap - INT TERM
+  mkdir -p "$CONFIG_DIR"
+  normalize_version "$version" > "$VERSION_FILE"
   write_wrapper
   install_self
   install_command_link
-  echo "installed: $APP_ROOT"
+  echo "installed: $APP_ROOT ($(normalize_version "$version"))"
   if [ "$had_service" -eq 1 ]; then
     service_start
     echo "auto-start service restarted with the new version."
@@ -1397,6 +1567,17 @@ show_status() {
     echo "app       : installed ($APP_ROOT)"
   else
     echo "app       : not installed"
+  fi
+  ver=$(installed_version || true)
+  if [ -n "${ver:-}" ]; then
+    latest=$(latest_version || true)
+    if [ -n "${latest:-}" ] && version_gt "$latest" "$ver"; then
+      echo "version   : $ver (update $latest available - menu 4)"
+    else
+      echo "version   : $ver"
+    fi
+  else
+    echo "version   : unknown"
   fi
   pid=$(dashboard_pid)
   if [ -n "$pid" ]; then
@@ -2159,6 +2340,7 @@ menu_uninstall() {
 }
 
 menu_main() {
+  update_startup
   while true; do
     if [ -t 1 ]; then clear; fi
     pid=$(dashboard_pid)
@@ -2183,6 +2365,19 @@ menu_main() {
     else
       ea_plain="not installed"
       ea="${YELLOW}$ea_plain${NC}"
+    fi
+    ver=$(installed_version || true)
+    if [ -n "${ver:-}" ]; then
+      if [ "${UPDATE_AVAILABLE:-0}" -eq 1 ] && [ -n "${UPDATE_LATEST:-}" ]; then
+        ver_plain="$ver  (update $UPDATE_LATEST available - menu 4)"
+        ver_col="${YELLOW}$ver_plain${NC}"
+      else
+        ver_plain="$ver"
+        ver_col="${GREEN}$ver_plain${NC}"
+      fi
+    else
+      ver_plain="unknown"
+      ver_col="${YELLOW}$ver_plain${NC}"
     fi
     bind=$(current_bind)
     port=$(current_port)
@@ -2241,6 +2436,7 @@ menu_main() {
     ui_top
     ui_row "Dashboard" "$st_plain" "$st"
     ui_row "App" "$app_plain" "$app"
+    ui_row "Version" "$ver_plain" "$ver_col"
     ui_row "Service" "$svc_plain" "$svc_col"
     ui_row "Expert" "$ea_plain" "$ea"
     ui_row "License" "$lic_plain" "$lic_col"
@@ -2262,7 +2458,8 @@ menu_main() {
     ui_item "11" "Disk space / server storage"
     ui_item "12" "Snapshot file / data source"
     ui_item "13" "License (dashboard login)"
-    ui_item "14" "Exit"
+    ui_item "14" "Update policy (notify / auto / off)"
+    ui_item "15" "Exit"
     ui_bottom
     printf '%s\n' "${CYAN}tip: type 0 inside any option to return to this menu.${NC}"
     printf '\n%s' "${CYAN}Enter Number Of List:${NC} "
@@ -2285,8 +2482,9 @@ menu_main() {
       11) menu_disk ;;
       12) menu_snapshot ;;
       13) menu_license ;;
-      14) echo "bye."; exit 0 ;;
-      *) msg_warn "please choose 1-14." ;;
+      14) menu_update_policy ;;
+      15) echo "bye."; exit 0 ;;
+      *) msg_warn "please choose 1-15." ;;
     esac
     printf '%s' "${CYAN}Press Enter to continue...${NC}"
     IFS= read -r _ || { echo ""; exit 0; }

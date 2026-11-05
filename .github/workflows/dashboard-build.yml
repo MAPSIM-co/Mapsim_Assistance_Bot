@@ -120,6 +120,32 @@ jobs:
           fi
           echo "SOURCE_DIR=$src" >> "$GITHUB_ENV"
 
+      # The footer, /api/version and the update checker all read this constant,
+      # so a tag that disagrees with it would ship a build that reports the
+      # wrong version.
+      - name: Verify the version constant matches the tag
+        if: startsWith(github.ref, 'refs/tags/dashboard-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          want="${GITHUB_REF_NAME#dashboard-free-v}"
+          want="${want#dashboard-v}"
+          have=$(python - "$SOURCE_DIR/live_dashboard.py" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          text = Path(sys.argv[1]).read_text(encoding="utf-8")
+          match = re.search(r'^DASHBOARD_VERSION = "([^"]+)"', text, re.MULTILINE)
+          print(match.group(1) if match else "")
+          PY
+          )
+          if [ "$have" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match DASHBOARD_VERSION='$have' in live_dashboard.py"
+            exit 1
+          fi
+          echo "version constant $have matches $GITHUB_REF_NAME"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

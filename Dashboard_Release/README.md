@@ -142,11 +142,14 @@ you can copy it), whether the live snapshot file is being read
                                      it. The dashboard only starts with a valid,
                                      unexpired license and uses the same username
                                      and password for the web sign-in
- 14) Exit
+ 14) Update policy (notify/auto/off)- how a newer dashboard release is handled
+                                     (see **Dashboard updates** below)
+ 15) Exit
 
 The Windows menu (`mapsim-menu.ps1`) has no separate snapshot item, so the
-numbering there shifts up by one: **12) License (dashboard login)** and
-**13) Exit**. Every other option number is the same on all platforms.
+numbering there shifts up by one: **12) License (dashboard login)**,
+**13) Update policy** and **14) Exit**. Every other option number is the same on
+all platforms.
 
 Inside any of these options, type **0** (or `b` / `back` / `q`) at a prompt to
 leave it and return to the main menu. Nothing is changed when you do that — the
@@ -195,6 +198,33 @@ and are only saved when the license is active. They are stored in
 - The web sign-in (local and internet) is the license username and password.
 - If the snapshot is not there yet, the dashboard starts with a warning and
   enforces the account number as soon as the snapshot appears.
+
+### Dashboard updates
+
+The installed version is shown in the dashboard under the title and in the
+footer (`Dashboard Version vX.Y.Z`), and in the menu panel (`Version : ...`).
+The dashboard asks GitHub once every six hours whether a newer
+`dashboard-vX.Y.Z` release exists. When one does:
+
+- a red **UPDATE** banner names both versions and links to the release notes,
+- the footer shows `UPDATE vX.Y.Z`,
+- the menu prints `dashboard update available: old -> new` at start.
+
+Menu **14 (macOS/Linux) / 13 (Windows)** chooses what happens on the next menu
+start:
+
+  1) notify - check and tell me (default)
+  2) auto   - download, checksum-check and install the new release by itself,
+              then restart the service if it was running
+  3) off    - never check (no network request at all)
+  4) check now
+
+The check is a single unauthenticated GitHub API call from the menu/dashboard
+process, cached for six hours in `~/.config/mapsim-dashboard/update-cache`
+(`%APPDATA%\MapsimDashboard\update-cache.json` on Windows). It sends no account
+data. The version installed by the menu is recorded in `dashboard.version` so
+the comparison survives restarts; builds installed before this feature report
+their version themselves.
 
 ### Snapshot / data source
 
@@ -586,6 +616,12 @@ GitHub only reads workflows from that location; it operates on the
 The release job attaches every archive and its `.sha256` checksum to the GitHub
 release. The private source token is used only inside the runner and is never
 written to disk or to the release.
+
+The tag must match `DASHBOARD_VERSION` in the source (`dashboard-v1.0.5` ↔
+`DASHBOARD_VERSION = "1.0.5"`). The first build step compares the two and fails
+with `tag ... does not match DASHBOARD_VERSION` otherwise — the footer and the
+update checker read that constant, so a mismatch would ship a build that reports
+the wrong version.
 
 If `SOURCE_REPO` is not configured, the build stops with a clear error instead
 of producing an incomplete release.
