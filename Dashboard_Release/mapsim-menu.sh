@@ -2713,6 +2713,9 @@ bootstrap() {
     install_self
     install_command_link
   fi
+  # Re-running install.sh refreshes the menu itself; applying the stored policy
+  # here means 'auto' gets its hourly check without anyone opening the menu.
+  update_timer_sync
 
   if [ "$public" -eq 1 ]; then
     write_env_file "0.0.0.0"

@@ -227,6 +227,13 @@ even when nobody opens the menu on that machine. Each pass writes to
 failed). Choosing notify/off removes that background check again; Windows keeps
 the check at menu start.
 
+Re-running the install command (the `curl ... install.sh | sh` line) also
+refreshes `~/.local/share/MapsimDashboard/mapsim-menu.sh` from GitHub and
+re-applies the saved policy, so an existing machine picks up a newer menu and,
+with **auto**, the hourly check without touching any files by hand. A server
+that was installed before this feature therefore needs that one install command
+once; after it, releases are installed on their own.
+
 The check is a single unauthenticated GitHub API call from the menu/dashboard
 process, cached for six hours in `~/.config/mapsim-dashboard/update-cache`
 (`%APPDATA%\MapsimDashboard\update-cache.json` on Windows). It sends no account
