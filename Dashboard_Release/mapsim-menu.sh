@@ -28,6 +28,8 @@ LOG_KEEP_LINES=200
 VERSION_FILE="$CONFIG_DIR/dashboard.version"
 UPDATE_POLICY_FILE="$CONFIG_DIR/update-policy"
 UPDATE_CACHE_FILE="$CONFIG_DIR/update-cache"
+UPDATE_LOG_FILE="$CONFIG_DIR/update.log"
+UPDATE_TIMER_NAME="mapsim-dashboard-update"
 UPDATE_CACHE_TTL=21600
 UPDATE_HTTP_TIMEOUT=6
 UPDATE_INSTALLED=""
@@ -1058,13 +1060,196 @@ update_startup() {
     download_and_install
     unset WANT_VERSION
     update_refresh
-    printf '%s' "press Enter to open the menu..."
-    IFS= read -r _ || true
-    echo ""
+    if [ -t 0 ]; then
+      printf '%s' "press Enter to open the menu..."
+      IFS= read -r _ || true
+      echo ""
+    fi
     return 0
   fi
   echo ""
   msg_warn "dashboard update available: $UPDATE_INSTALLED -> $UPDATE_LATEST (menu 4 installs it)"
+}
+
+# Append to a small log so an unattended update leaves a trace.
+update_log() {
+  mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$UPDATE_LOG_FILE" 2>/dev/null || true
+  size=$(wc -c < "$UPDATE_LOG_FILE" 2>/dev/null | tr -d ' ')
+  case "${size:-}" in ''|*[!0-9]*) size=0 ;; esac
+  if [ "$size" -gt 65536 ]; then
+    tail -n 200 "$UPDATE_LOG_FILE" > "$UPDATE_LOG_FILE.tmp" 2>/dev/null \
+      && mv -f "$UPDATE_LOG_FILE.tmp" "$UPDATE_LOG_FILE" 2>/dev/null || true
+  fi
+}
+
+# Non-interactive update pass used by the timer (Mapsim_BOT --auto-update).
+# It never asks anything, so it is safe to run from cron/systemd.
+auto_update_run() {
+  policy=$(update_policy)
+  if [ "$policy" != "auto" ]; then
+    update_log "policy=$policy - no automatic update."
+    return 0
+  fi
+  if ! is_installed; then
+    update_log "dashboard is not installed - nothing to update."
+    return 0
+  fi
+  # The 6h menu cache would hide a release published since the last check.
+  rm -f "$UPDATE_CACHE_FILE"
+  update_refresh
+  if [ -z "${UPDATE_LATEST:-}" ]; then
+    update_log "check failed (GitHub unreachable or rate limited)."
+    return 1
+  fi
+  if [ "$UPDATE_AVAILABLE" -eq 0 ]; then
+    update_log "up to date ($UPDATE_INSTALLED)."
+    return 0
+  fi
+  update_log "update available: $UPDATE_INSTALLED -> $UPDATE_LATEST; installing."
+  WANT_VERSION="dashboard-v$UPDATE_LATEST"
+  if download_and_install >> "$UPDATE_LOG_FILE" 2>&1; then
+    unset WANT_VERSION
+    new=$(installed_version || true)
+    update_log "installed $UPDATE_LATEST (version file: ${new:-unknown})."
+    return 0
+  fi
+  unset WANT_VERSION
+  update_log "install of $UPDATE_LATEST failed - see the lines above."
+  return 1
+}
+
+# ---------------------------------------------------------------- update timer
+
+update_timer_dir() {
+  [ "$OS" = "Linux" ] || return 1
+  if [ "$(id -u)" -eq 0 ]; then
+    printf '%s\n' "/etc/systemd/system"
+  else
+    printf '%s\n' "$HOME/.config/systemd/user"
+  fi
+}
+
+update_timer_installed() {
+  if [ "$OS" = "Darwin" ]; then
+    [ -f "$HOME/Library/LaunchAgents/$LABEL.update.plist" ]
+    return
+  fi
+  dir=$(update_timer_dir) || return 1
+  [ -f "$dir/$UPDATE_TIMER_NAME.timer" ]
+}
+
+update_timer_remove() {
+  if [ "$OS" = "Darwin" ]; then
+    plist="$HOME/Library/LaunchAgents/$LABEL.update.plist"
+    [ -f "$plist" ] || return 0
+    launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+    rm -f "$plist"
+    return 0
+  fi
+  [ "$OS" = "Linux" ] || return 0
+  dir=$(update_timer_dir) || return 0
+  [ -f "$dir/$UPDATE_TIMER_NAME.timer" ] || return 0
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl disable --now "$UPDATE_TIMER_NAME.timer" >/dev/null 2>&1 || true
+    rm -f "$dir/$UPDATE_TIMER_NAME.timer" "$dir/$UPDATE_TIMER_NAME.service"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  else
+    systemctl --user disable --now "$UPDATE_TIMER_NAME.timer" >/dev/null 2>&1 || true
+    rm -f "$dir/$UPDATE_TIMER_NAME.timer" "$dir/$UPDATE_TIMER_NAME.service"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
+}
+
+# Policy=auto keeps a background check that runs the update pass every hour, so
+# a release is installed even when nobody opens the menu on that machine.
+update_timer_sync() {
+  policy=$(update_policy)
+  if [ "$policy" != "auto" ] || ! is_installed; then
+    update_timer_remove
+    return 0
+  fi
+  if [ "$OS" = "Darwin" ]; then
+    plist="$HOME/Library/LaunchAgents/$LABEL.update.plist"
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL.update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>$MENU_DEST</string>
+    <string>--auto-update</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>$HOME</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StartInterval</key>
+  <integer>3600</integer>
+  <key>StandardOutPath</key>
+  <string>$UPDATE_LOG_FILE</string>
+  <key>StandardErrorPath</key>
+  <string>$UPDATE_LOG_FILE</string>
+</dict>
+</plist>
+EOF
+    launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+    launchctl bootstrap "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+    msg_info "automatic update: an hourly launchd check installs new releases."
+    msg_info "log: $UPDATE_LOG_FILE"
+    return 0
+  fi
+  if [ "$OS" != "Linux" ]; then
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    msg_warn "systemd is not available here; automatic updates run only when the menu starts."
+    return 0
+  fi
+  dir=$(update_timer_dir) || return 0
+  mkdir -p "$dir" 2>/dev/null || return 0
+  cat > "$dir/$UPDATE_TIMER_NAME.service" <<EOF
+[Unit]
+Description=Mapsim dashboard automatic update
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh "$MENU_DEST" --auto-update
+EOF
+  cat > "$dir/$UPDATE_TIMER_NAME.timer" <<EOF
+[Unit]
+Description=Mapsim dashboard update check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable --now "$UPDATE_TIMER_NAME.timer" >/dev/null 2>&1 || true
+  else
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --user enable --now "$UPDATE_TIMER_NAME.timer" >/dev/null 2>&1 || true
+    linger=$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || true)
+    if [ "$linger" != "yes" ]; then
+      msg_warn "run 'sudo loginctl enable-linger $USER' so the update timer also runs after logout."
+    fi
+  fi
+  msg_info "automatic update: an hourly timer checks GitHub and installs new releases."
+  msg_info "log: $UPDATE_LOG_FILE"
 }
 
 menu_update_policy() {
@@ -1076,7 +1261,7 @@ menu_update_policy() {
     echo "  current policy: $cur"
     echo ""
     echo "  1) notify - check when the menu starts and tell me (default)"
-    echo "  2) auto   - install a new version automatically when the menu starts"
+    echo "  2) auto   - install new releases automatically (hourly background check)"
     echo "  3) off    - never check for updates"
     echo "  4) check now"
     a=$(ask "choose 1-4 (0 = back)")
@@ -1085,9 +1270,13 @@ menu_update_policy() {
       return
     fi
     case "$a" in
-      1) set_update_policy notify; echo "policy: notify." ;;
-      2) set_update_policy auto; echo "policy: auto - a new release installs at menu start." ;;
-      3) set_update_policy off; echo "policy: off." ;;
+      1) set_update_policy notify; update_timer_remove; echo "policy: notify." ;;
+      2)
+        set_update_policy auto
+        echo "policy: auto - new releases install themselves; no menu needs to stay open."
+        update_timer_sync
+        ;;
+      3) set_update_policy off; update_timer_remove; echo "policy: off." ;;
       4) update_check_now ;;
       *) echo "please choose 1-4." ;;
     esac
@@ -1182,6 +1371,7 @@ EOF
   install_self
   install_command_link
   echo "installed: $APP_ROOT ($(normalize_version "$version"))"
+  update_timer_sync
   if [ "$had_service" -eq 1 ]; then
     service_start
     echo "auto-start service restarted with the new version."
@@ -1408,9 +1598,11 @@ RestartSec=5
   esac
   mkdir -p "$CONFIG_DIR"
   echo "$svc_port" > "$PORT_FILE"
+  update_timer_sync
 }
 
 service_remove() {
+  update_timer_remove
   case "$OS" in
     Darwin)
       plist="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -2341,6 +2533,9 @@ menu_uninstall() {
 
 menu_main() {
   update_startup
+  if [ "$(update_policy)" = "auto" ] && ! update_timer_installed; then
+    update_timer_sync
+  fi
   while true; do
     if [ -t 1 ]; then clear; fi
     pid=$(dashboard_pid)
@@ -2576,12 +2771,15 @@ case "${1:-}" in
   --stop)
     stop_dashboard --force
     ;;
+  --auto-update)
+    auto_update_run
+    ;;
   ""|-i|--menu)
     trim_logs
     menu_main
     ;;
   *)
-    echo "usage: $MENU_CMD [--bootstrap ...] [--status] [--stop]" >&2
+    echo "usage: $MENU_CMD [--bootstrap ...] [--status] [--stop] [--auto-update]" >&2
     exit 2
     ;;
 esac

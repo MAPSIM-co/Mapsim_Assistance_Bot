@@ -210,14 +210,22 @@ The dashboard asks GitHub once every six hours whether a newer
 - the footer shows `UPDATE vX.Y.Z`,
 - the menu prints `dashboard update available: old -> new` at start.
 
-Menu **14 (macOS/Linux) / 13 (Windows)** chooses what happens on the next menu
-start:
+Menu **14 (macOS/Linux) / 13 (Windows)** chooses how new releases are handled:
 
   1) notify - check and tell me (default)
-  2) auto   - download, checksum-check and install the new release by itself,
-              then restart the service if it was running
+  2) auto   - install automatically in the background (macOS/Linux: an hourly
+              launchd/systemd check) and at menu start, then restart the
+              service if it was running
   3) off    - never check (no network request at all)
   4) check now
+
+On macOS and Linux, choosing **auto** also installs an hourly background check
+(`com.mapsim.dashboard.update` LaunchAgent or the
+`mapsim-dashboard-update.timer` systemd user timer), so a release is installed
+even when nobody opens the menu on that machine. Each pass writes to
+`~/.config/mapsim-dashboard/update.log` (up to date, installing, installed or
+failed). Choosing notify/off removes that background check again; Windows keeps
+the check at menu start.
 
 The check is a single unauthenticated GitHub API call from the menu/dashboard
 process, cached for six hours in `~/.config/mapsim-dashboard/update-cache`
