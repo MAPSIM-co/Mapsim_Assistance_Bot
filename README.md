@@ -241,7 +241,7 @@ The same actions are also available as installer flags (`--public`,
   such as `C:\Program Files\MetaTrader 5` are translated to the right
   `drive_c` folder automatically.
 - **Keep the dashboard up to date** — the version is printed in the dashboard
-  footer and under the title (`Dashboard Version v1.0.5`). When a newer release is published, the dashboard shows
+  footer and under the title (`Dashboard Version v1.0.6`). When a newer release is published, the dashboard shows
   a red update banner with the release-notes link, and the menu warns at start.
   Menu 14 on macOS/Linux (13 on Windows) chooses: **notify** (default),
   **auto** (download, checksum-check and install the new release by itself at

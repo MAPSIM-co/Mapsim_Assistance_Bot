@@ -617,8 +617,8 @@ The release job attaches every archive and its `.sha256` checksum to the GitHub
 release. The private source token is used only inside the runner and is never
 written to disk or to the release.
 
-The tag must match `DASHBOARD_VERSION` in the source (`dashboard-v1.0.5` ↔
-`DASHBOARD_VERSION = "1.0.5"`). The first build step compares the two and fails
+The tag must match `DASHBOARD_VERSION` in the source (`dashboard-v1.0.6` ↔
+`DASHBOARD_VERSION = "1.0.6"`). The first build step compares the two and fails
 with `tag ... does not match DASHBOARD_VERSION` otherwise — the footer and the
 update checker read that constant, so a mismatch would ship a build that reports
 the wrong version.
