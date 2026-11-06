@@ -27,9 +27,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
-$MenuPath = Join-Path $env:LOCALAPPDATA 'MapsimDashboard\mapsim-menu.ps1'
+$MenuPath = Join-Path $env:LOCALAPPDATA 'MapsimBOT\mapsim-menu.ps1'
+$LegacyMenuPath = Join-Path $env:LOCALAPPDATA 'MapsimDashboard\mapsim-menu.ps1'
 
 # For removal commands prefer the already-installed copy (works offline).
+if (($RemoveService -or $Uninstall) -and -not (Test-Path $MenuPath) -and (Test-Path $LegacyMenuPath)) {
+  $MenuPath = $LegacyMenuPath
+}
 if (($RemoveService -or $Uninstall) -and (Test-Path $MenuPath)) {
   Write-Host 'Mapsim BOT control center (installed copy)'
   $pass = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $MenuPath)

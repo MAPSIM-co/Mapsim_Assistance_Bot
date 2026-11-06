@@ -25,7 +25,10 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 $FallbackVersion = 'dashboard-v1.0.6'
 $AppDir = Join-Path $env:LOCALAPPDATA 'MapsimDashboard'
 $Binary = Join-Path $AppDir 'MapsimDashboard.exe'
-$MenuPath = Join-Path $AppDir 'mapsim-menu.ps1'
+# Kept outside AppDir: an update replaces AppDir wholesale, and a menu that
+# lived inside it would be deleted mid-update along with the running script.
+$MenuDir = Join-Path $env:LOCALAPPDATA 'MapsimBOT'
+$MenuPath = Join-Path $MenuDir 'mapsim-menu.ps1'
 $ShimPath = Join-Path $AppDir 'Mapsim_BOT.cmd'
 $ConfigDir = Join-Path $env:APPDATA 'MapsimDashboard'
 $EnvFile = Join-Path $ConfigDir 'dashboard-access.env'
@@ -367,6 +370,9 @@ function Install-Dashboard {
     $expected = ((Get-Content (Join-Path $tmp "$asset.sha256")) -split '\s+')[0].ToLower()
     $actual = (Get-FileHash (Join-Path $tmp $asset) -Algorithm SHA256).Hash.ToLower()
     if ($expected -ne $actual) { throw "checksum mismatch for $asset" }
+    # Copy the menu out before AppDir is replaced: on older installs the running
+    # script lived inside it and would be gone by the time Install-Self reads it.
+    Install-Self
     $hadService = Test-ServiceRunning
     Stop-Dashboard | Out-Null
     if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
@@ -376,7 +382,6 @@ function Install-Dashboard {
   } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
   }
-  Install-Self
   Write-Shim
   New-Item -ItemType Directory -Force $ConfigDir | Out-Null
   Set-Content -Path $VersionFile -Value ($ver -replace '^dashboard-v', '') -Encoding ASCII
@@ -388,8 +393,12 @@ function Install-Dashboard {
 }
 
 function Install-Self {
-  New-Item -ItemType Directory -Force $AppDir | Out-Null
+  New-Item -ItemType Directory -Force $MenuDir | Out-Null
   Copy-Item -Force $PSCommandPath $MenuPath
+  $legacy = Join-Path $AppDir 'mapsim-menu.ps1'
+  if ((Test-Path $legacy) -and ($legacy -ne $MenuPath)) {
+    Remove-Item $legacy -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Install-Service {
@@ -1190,6 +1199,7 @@ function Uninstall-Everything {
   Remove-Service
   Stop-Dashboard | Out-Null
   if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
+  if (Test-Path $MenuDir) { Remove-Item -Recurse -Force $MenuDir }
   if (Test-Path $ConfigDir) { Remove-Item -Recurse -Force $ConfigDir }
   if (Test-Path $LicenseDir) { Remove-Item -Recurse -Force $LicenseDir }
   $desktop = [Environment]::GetFolderPath('Desktop')

@@ -60,7 +60,10 @@ case "$OS" in
     ;;
 esac
 
-MENU_DEST="$HOME/.local/share/MapsimDashboard/mapsim-menu.sh"
+# Kept outside APP_ROOT: an update replaces APP_ROOT wholesale, and a menu that
+# lived inside it would be deleted mid-update along with the running script.
+MENU_DEST="$HOME/.local/share/MapsimBOT/mapsim-menu.sh"
+LEGACY_MENU_DEST="$HOME/.local/share/MapsimDashboard/mapsim-menu.sh"
 
 # ---------------------------------------------------------------- utilities
 
@@ -936,6 +939,9 @@ install_self() {
   mkdir -p "$(dirname "$MENU_DEST")"
   cp "$0" "$MENU_DEST"
   chmod +x "$MENU_DEST"
+  if [ "$LEGACY_MENU_DEST" != "$MENU_DEST" ]; then
+    rm -f "$LEGACY_MENU_DEST" 2>/dev/null || true
+  fi
 }
 
 # ---------------------------------------------------------------- dashboard version / updates
@@ -1339,6 +1345,9 @@ download_and_install() {
   else
     (cd "$tmp" && shasum -a 256 -c "$asset.sha256") || { rm -rf "$tmp"; return 1; }
   fi
+  # Copy the menu out before APP_ROOT is replaced: on older installs the running
+  # script lived inside it and would be gone by the time install_self reads $0.
+  install_self
   had_service=0
   if service_installed && service_active; then had_service=1; fi
   stop_dashboard --force >/dev/null 2>&1 || true
@@ -1368,7 +1377,6 @@ EOF
   mkdir -p "$CONFIG_DIR"
   normalize_version "$version" > "$VERSION_FILE"
   write_wrapper
-  install_self
   install_command_link
   echo "installed: $APP_ROOT ($(normalize_version "$version"))"
   update_timer_sync
@@ -2083,7 +2091,8 @@ uninstall_everything() {
       ;;
   esac
   rm -f "$WRAPPER"
-  rm -f "$MENU_DEST"
+  rm -f "$MENU_DEST" "$LEGACY_MENU_DEST"
+  rmdir "$HOME/.local/share/MapsimBOT" 2>/dev/null || true
   rmdir "$HOME/.local/share/MapsimDashboard" 2>/dev/null || true
   rm -rf "$CONFIG_DIR"
   rm -rf "$LICENSE_DIR"

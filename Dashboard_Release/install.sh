@@ -39,7 +39,10 @@ esac
 # If the control center is already installed, run the local copy (works offline).
 case "${1:-}" in
   --remove-service|--uninstall)
-    m="$HOME/.local/share/MapsimDashboard/mapsim-menu.sh"
+    m="$HOME/.local/share/MapsimBOT/mapsim-menu.sh"
+    if [ ! -f "$m" ]; then
+      m="$HOME/.local/share/MapsimDashboard/mapsim-menu.sh"
+    fi
     if [ -f "$m" ]; then
       echo "Mapsim BOT control center (installed copy)"
       exec sh "$m" --bootstrap "$@"

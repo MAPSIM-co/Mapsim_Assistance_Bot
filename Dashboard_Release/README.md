@@ -228,7 +228,7 @@ failed). Choosing notify/off removes that background check again; Windows keeps
 the check at menu start.
 
 Re-running the install command (the `curl ... install.sh | sh` line) also
-refreshes `~/.local/share/MapsimDashboard/mapsim-menu.sh` from GitHub and
+refreshes `~/.local/share/MapsimBOT/mapsim-menu.sh` from GitHub and
 re-applies the saved policy, so an existing machine picks up a newer menu and,
 with **auto**, the hourly check without touching any files by hand. A server
 that was installed before this feature therefore needs that one install command
