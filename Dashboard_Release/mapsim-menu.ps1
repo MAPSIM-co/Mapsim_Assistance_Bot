@@ -394,7 +394,11 @@ function Install-Dashboard {
 
 function Install-Self {
   New-Item -ItemType Directory -Force $MenuDir | Out-Null
-  Copy-Item -Force $PSCommandPath $MenuPath
+  $sourcePath = [IO.Path]::GetFullPath($PSCommandPath)
+  $menuPath = [IO.Path]::GetFullPath($MenuPath)
+  if (-not [string]::Equals($sourcePath, $menuPath, [StringComparison]::OrdinalIgnoreCase)) {
+    Copy-Item -Force $sourcePath $menuPath
+  }
   $legacy = Join-Path $AppDir 'mapsim-menu.ps1'
   if ((Test-Path $legacy) -and ($legacy -ne $MenuPath)) {
     Remove-Item $legacy -Force -ErrorAction SilentlyContinue
