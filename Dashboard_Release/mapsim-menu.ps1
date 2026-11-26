@@ -1,4 +1,4 @@
-# Mapsim BOT control center - interactive management menu for Windows.
+﻿# Mapsim BOT control center - interactive management menu for Windows.
 #
 # Single source of truth for installing, starting, stopping, servicing and
 # removing the Mapsim Live Dashboard. install.ps1 only downloads this file
@@ -17,6 +17,7 @@ param(
   [switch]$Stop,
   [switch]$RemoveService,
   [switch]$Uninstall,
+  [switch]$Console,
   [string]$Version
 )
 
@@ -44,6 +45,466 @@ $LicenseAuthFile = Join-Path $LicenseDir 'dashboard.auth'
 $VersionFile = Join-Path $ConfigDir 'dashboard.version'
 $UpdatePolicyFile = Join-Path $ConfigDir 'update-policy'
 $UpdateCacheFile = Join-Path $ConfigDir 'update-cache.json'
+
+# ---------------------------------------------------------------- language (presentation only)
+# Menu text is translated at the output layer: the Write-Host replacement below,
+# Ui-Row, Ui-Item and Read-Default pass every string through Find-FaText before it
+# is printed. A string with no entry and no matching pattern is printed unchanged,
+# so both languages run exactly the same code and a missing line can never break
+# the menu. The choice is stored in %APPDATA%\MapsimDashboard\dashboard-lang;
+# press L in the main menu to switch.
+#
+# Persian is not drawn by the console: a console shows Persian letters unjoined
+# and lays a line that mixes Persian with numbers and English words out piece by
+# piece from the left, so the sentence reads scrambled on every Windows version
+# and in every font. Persian mode therefore uses the window host below, which is
+# the only host that shapes and orders the text correctly. English and the
+# non-interactive switches keep the plain console.
+$MenuLangFile = Join-Path $ConfigDir 'dashboard-lang'
+$script:MapsimLang = 'en'
+try {
+  if (Test-Path $MenuLangFile) {
+    $savedLang = (Get-Content -Path $MenuLangFile -Raw).Trim().ToLowerInvariant()
+    if ($savedLang -eq 'fa') { $script:MapsimLang = 'fa' }
+  }
+} catch { }
+
+$script:FaWord = @{
+  'running'  = 'در حال اجرا'
+  'stopped'  = 'متوقف'
+  'enabled'  = 'فعال'
+  'disabled' = 'غیرفعال'
+  'installed'= 'نصب‌شده'
+  'yes'      = 'بله'
+  'no'       = 'خیر'
+  'unknown'  = 'نامشخص'
+  'saved'    = 'ذخیره‌شده'
+  'not set'  = 'تنظیم‌نشده'
+  'notify'   = 'اطلاع‌دهی'
+  'auto'     = 'خودکار'
+  'off'      = 'خاموش'
+  'local'    = 'محلی'
+  'internet' = 'اینترنت'
+  'free'     = 'آزاد'
+  'active'   = 'فعال'
+  'not active' = 'غیرفعال'
+}
+
+$script:FaText = @{
+  # --- main frame ---------------------------------------------------------
+  'Dashboard'                         = 'داشبورد'
+  'App'                               = 'برنامه'
+  'Version'                           = 'نسخه'
+  'Service'                           = 'اجرای خودکار'
+  'Expert'                            = 'اکسپرت'
+  'License'                           = 'لایسنس'
+  'Access'                            = 'دسترسی'
+  'Disk'                              = 'دیسک'
+  'not installed'                     = 'نصب نشده'
+  'unknown'                           = 'نامشخص'
+  'saved'                             = 'ذخیره‌شده'
+  'not set'                           = 'تنظیم‌نشده'
+
+  # --- main menu items ----------------------------------------------------
+  'Status'                            = 'وضعیت'
+  'Start dashboard'                   = 'اجرای داشبورد'
+  'Stop dashboard'                    = 'توقف داشبورد'
+  'Install / update dashboard'        = 'نصب / بروزرسانی داشبورد'
+  'Service management (start/stop/restart/enable/disable)' = 'مدیریت اجرای خودکار (اجرا / توقف / ری‌استارت / فعال / غیرفعال)'
+  'Remove auto-start service'         = 'حذف اجرای خودکار'
+  'Access mode (local / internet)'    = 'حالت دسترسی (فقط این رایانه / اینترنت)'
+  'Uninstall everything'              = 'حذف کامل برنامه'
+  'Expert Advisor: install / update'  = 'اکسپرت: نصب / بروزرسانی'
+  'Expert Advisor: version check'     = 'اکسپرت: بررسی نسخه'
+  'Disk space / server storage'       = 'فضای دیسک / ذخیره‌سازی'
+  'License (dashboard login)'         = 'لایسنس (ورود به داشبورد)'
+  'Update policy (notify / auto / off)' = 'روش بروزرسانی (اطلاع / خودکار / خاموش)'
+  'Exit'                              = 'خروج'
+  # The L item names the language it switches TO, never the one on screen, so
+  # it reads "Language: FA" in English and "زبان: EN" in Persian.
+  'Language: FA'                      = 'زبان: EN'
+
+  # --- prompts ------------------------------------------------------------
+  'Enter Number Of List'              = 'شماره گزینه را وارد کنید'
+  'choose 1-7'                        = 'یک شماره از ۱ تا ۷ وارد کنید'
+  'choose 1-4 (0 = back)'             = 'یک شماره از ۱ تا ۴ وارد کنید (۰ = بازگشت)'
+  'choose 1-3 (0 = back)'             = 'یک شماره از ۱ تا ۳ وارد کنید (۰ = بازگشت)'
+  'choose 1 or 2'                     = '۱ یا ۲ را وارد کنید'
+  'port'                              = 'پورت'
+  'choose another port'               = 'پورت دیگری وارد کنید'
+  'Press Enter to continue'           = 'برای ادامه کلید Enter را بزنید'
+  'Press Enter to open the menu'      = 'برای باز شدن منو کلید Enter را بزنید'
+  'paste your license (0 = back)'     = 'کد لایسنس را وارد کنید (۰ = بازگشت)'
+  'license username (0 = back)'       = 'نام کاربری لایسنس (۰ = بازگشت)'
+  'license password (0 = back)'       = 'رمز لایسنس (۰ = بازگشت)'
+
+  # --- service menu -------------------------------------------------------
+  'auto-start task'                   = 'اجرای خودکار'
+  '1) Status / details'               = '۱) وضعیت / جزئیات'
+  '2) Install and enable (start now and at every logon)' = '۲) نصب و فعال‌سازی (همین حالا و در هر ورود ویندوز اجرا شود)'
+  '3) Start now'                      = '۳) اجرای همین حالا'
+  '4) Stop now'                       = '۴) توقف همین حالا'
+  '5) Restart now'                    = '۵) ری‌استارت همین حالا'
+  '6) Enable at logon'                = '۶) فعال‌سازی در شروع ویندوز'
+  '7) Disable at logon'               = '۷) غیرفعال‌سازی در شروع ویندوز'
+  '0) Back to the main menu'          = '۰) بازگشت به منوی اصلی'
+  'auto-start task:'                  = 'اجرای خودکار:'
+  'task installed and enabled: the dashboard starts now and at every logon.' = 'اجرای خودکار نصب و فعال شد: داشبورد همین حالا و در هر ورود ویندوز اجرا می‌شود.'
+  'the task was not installed.'       = 'اجرای خودکار نصب نشد.'
+  'not installed yet - use menu 4.'   = 'هنوز نصب نشده — از گزینه ۴ استفاده کنید.'
+
+  # --- update policy ------------------------------------------------------
+  'dashboard updates'                 = 'بروزرسانی داشبورد'
+  '1) notify - check when the menu starts and tell me (default)' = '۱) اطلاع‌دهی — هنگام باز شدن منو بررسی شود و نتیجه اعلام شود (پیش‌فرض)'
+  '2) auto   - install a new version automatically when the menu starts' = '۲) خودکار — نسخه جدید هنگام باز شدن منو نصب شود'
+  '3) off    - never check for updates' = '۳) خاموش — هرگز بروزرسانی بررسی نشود'
+  '4) check now'                      = '۴) بررسی فوری'
+  'policy: notify.'                   = 'روش بروزرسانی: اطلاع‌دهی.'
+  'policy: auto - a new release installs at menu start.' = 'روش بروزرسانی: خودکار — نسخه جدید هنگام باز شدن منو نصب می‌شود.'
+  'policy: off.'                      = 'روش بروزرسانی: خاموش.'
+  'could not reach GitHub (offline or rate limited).' = 'به GitHub دسترسی نبود (اینترنت قطع است یا درخواست‌ها زیاد بوده).'
+  'please choose 1-4.'                = 'یک شماره از ۱ تا ۴ وارد کنید.'
+  'please choose 1-7.'                = 'یک شماره از ۱ تا ۷ وارد کنید.'
+
+  # --- access and status messages -----------------------------------------
+  'how should the dashboard be reachable?' = 'داشبورد از کجا در دسترس باشد؟'
+  '1) local only   (this computer, http://127.0.0.1)' = '۱) فقط این رایانه (http://127.0.0.1)'
+  '2) internet     (any device + this computer, sign in with the license)' = '۲) اینترنت (هر دستگاه + این رایانه، ورود با لایسنس)'
+  'the dashboard is not installed yet - use menu 4.' = 'داشبورد هنوز نصب نشده — از گزینه ۴ استفاده کنید.'
+  'the auto-start task is not installed - choose 2 first.' = 'اجرای خودکار نصب نشده — ابتدا گزینه ۲ را انتخاب کنید.'
+  'start requested.'                  = 'درخواست اجرا ثبت شد.'
+  'restart requested.'                = 'درخواست ری‌استارت ثبت شد.'
+  'task stopped. It starts again at the next logon while it is enabled.' = 'اجرای خودکار متوقف شد. تا وقتی فعال باشد، در ورود بعدی ویندوز دوباره اجرا می‌شود.'
+  'enabled: the dashboard starts automatically at the next logon.' = 'فعال شد: داشبورد در ورود بعدی ویندوز خودکار اجرا می‌شود.'
+  'installed : yes'                   = 'نصب‌شده: بله'
+  'enabled (starts at the next logon)' = 'فعال (در ورود بعدی ویندوز اجرا می‌شود)'
+  'no (choose 6 to enable it)'        = 'خیر (برای فعال‌سازی گزینه ۶ را بزنید)'
+  'installed : no (choose 2 to install it)' = 'نصب‌شده: خیر (برای نصب گزینه ۲ را بزنید)'
+  'dashboard : not running'           = 'داشبورد: اجرا نشده'
+  'dashboard is up to date'            = 'داشبورد بروز است'
+  'Exit the menu? (y/N)'              = 'از منو خارج می‌شوید؟ (y/N)'
+
+  # --- language ----------------------------------------------------------
+  'Language'                          = 'زبان'
+  'Persian'                           = 'فارسی'
+  'English'                           = 'انگلیسی'
+  'please choose 1-14 or L.'          = 'یک شماره از ۱ تا ۱۴ یا L را وارد کنید.'
+  'bye.'                              = 'خداحافظ.'
+
+  # --- window host --------------------------------------------------------
+  'note: the Persian window could not be opened; the menu continues in this console.' = 'توجه: پنجره فارسی باز نشد؛ منو در همین پنجره متنی ادامه پیدا می‌کند.'
+  'note: Persian needs the window; press L and choose English for the console.' = 'توجه: فارسی به پنجره نیاز دارد؛ کلید L را بزنید و انگلیسی را برای همین پنجره متنی انتخاب کنید.'
+
+  # --- license -----------------------------------------------------------
+  'license files:'                    = 'فایل‌های لایسنس:'
+  'this license was rejected:'        = 'این لایسنس رد شد:'
+  'nothing was saved.'                = 'چیزی ذخیره نشد.'
+  'license saved:'                    = 'لایسنس ذخیره شد:'
+  'no license entered.'               = 'لایسنسی وارد نشد.'
+  'back.'                             = 'بازگشت.'
+  'no license is saved.'              = 'لایسنسی ذخیره نشده است.'
+  'license removed.'                  = 'لایسنس حذف شد.'
+  'cancelled.'                        = 'لغو شد.'
+  'cancelled - the running dashboard was not changed.' = 'لغو شد — داشبورد در حال اجرا تغییر نکرد.'
+  'the username and password must not be empty.' = 'نام کاربری و رمز نباید خالی باشند.'
+  'the license check failed:'         = 'بررسی لایسنس انجام نشد:'
+  'the dashboard was not started. Fix the license in menu 12.' = 'داشبورد اجرا نشد. لایسنس را در گزینه ۱۲ اصلاح کنید.'
+  'the dashboard was not started - the license is required (menu 12).' = 'داشبورد اجرا نشد — لایسنس لازم است (گزینه ۱۲).'
+  'a valid Mapsim license is required to run the dashboard.' = 'برای اجرای داشبورد یک لایسنس معتبر Mapsim لازم است.'
+  'the installed dashboard build does not support the license yet.' = 'نسخه نصب‌شده داشبورد هنوز از لایسنس پشتیبانی نمی‌کند.'
+  'update it from menu 4 (Install / update dashboard), then enter the license (menu 12).' = 'آن را از گزینه ۴ (نصب / بروزرسانی داشبورد) بروزرسانی کنید، سپس لایسنس را وارد کنید (گزینه ۱۲).'
+  'update it from menu 4 (Install / update dashboard), then try again.' = 'آن را از گزینه ۴ (نصب / بروزرسانی داشبورد) بروزرسانی کنید و دوباره تلاش کنید.'
+  'update it from menu 4 (Install / update dashboard).' = 'آن را از گزینه ۴ (نصب / بروزرسانی داشبورد) بروزرسانی کنید.'
+  'enter the license now? (y/n)'      = 'همین حالا لایسنس وارد شود؟ (y/n)'
+  'dashboard login uses the license username/password' = 'ورود به داشبورد با نام کاربری و رمز لایسنس انجام می‌شود'
+  '1) Enter / update license'         = '۱) ورود / بروزرسانی لایسنس'
+  '2) Show license status'            = '۲) نمایش وضعیت لایسنس'
+  '3) Remove saved license'           = '۳) حذف لایسنسِ ذخیره‌شده'
+  'remove the saved license? the dashboard will not start without it (y/n)' = 'لایسنس ذخیره‌شده حذف شود؟ بدون آن داشبورد اجرا نمی‌شود (y/n)'
+  'saved: no'                         = 'ذخیره‌شده: خیر'
+  'please choose 1-3.'                = 'یک شماره از ۱ تا ۳ وارد کنید.'
+  'no (choose 2 to install it)'       = 'خیر (برای نصب گزینه ۲ را بزنید)'
+
+  # --- start / stop / status lines ---------------------------------------
+  'error: a valid Mapsim license is required - the dashboard was not started.' = 'خطا: لایسنس معتبر Mapsim لازم است — داشبورد اجرا نشد.'
+  'open menu 12 (License) and enter or fix the license.' = 'گزینه ۱۲ (لایسنس) را باز کنید و لایسنس را وارد یا اصلاح کنید.'
+  'note: the auto-start task was stopped for this manual start (it starts again at the next logon).' = 'توجه: برای این اجرای دستی، اجرای خودکار موقتاً متوقف شد (در ورود بعدی ویندوز دوباره اجرا می‌شود).'
+  'note: the auto-start task is installed and will start the dashboard again at the next logon (menu 6 removes it).' = 'توجه: اجرای خودکار نصب است و در ورود بعدی ویندوز داشبورد را دوباره اجرا می‌کند (گزینه ۶ آن را حذف می‌کند).'
+  'dashboard is up:'                  = 'داشبورد اجرا شد:'
+  'access  : the license username and password (menu 12)' = 'دسترسی: نام کاربری و رمز لایسنس (گزینه ۱۲)'
+  'auto-start task stopped (it starts again at the next logon; menu 6 removes it).' = 'اجرای خودکار متوقف شد (در ورود بعدی ویندوز دوباره اجرا می‌شود؛ گزینه ۶ آن را حذف می‌کند).'
+  'the dashboard is not running.'     = 'داشبورد اجرا نشده است.'
+  'the dashboard was not restarted.'  = 'داشبورد ری‌استارت نشد.'
+  'disabled: it will not start automatically any more. The running dashboard keeps running until you stop it (4).' = 'غیرفعال شد: دیگر خودکار اجرا نمی‌شود. داشبوردِ در حال اجرا تا وقتی خودتان متوقفش نکنید (گزینه ۴) اجرا می‌ماند.'
+  'busy (another program)'            = 'در استفاده برنامه دیگر'
+
+  # --- disk ---------------------------------------------------------------
+  'disk space:'                       = 'فضای دیسک:'
+  'dashboard folders:'                = 'پوشه‌های داشبورد:'
+  'logs are trimmed automatically above 256 KB (the newest lines are kept).' = 'لاگ‌ها بالای ۲۵۶ کیلوبایت خودکار کوتاه می‌شوند (جدیدترین خطوط می‌مانند).'
+  'hint: free up space by removing old dashboard logs or an unused MT5 copy.' = 'راهنما: با حذف لاگ‌های قدیمی داشبورد یا یک نسخه بلااستفاده MT5 فضا آزاد کنید.'
+
+  # --- main menu actions --------------------------------------------------
+  'no service is installed.'          = 'اجرای خودکار نصب نشده است.'
+  'remove the auto-start service? (y/n)' = 'اجرای خودکار حذف شود؟ (y/N)'
+  'service removed (the app itself stays installed).' = 'اجرای خودکار حذف شد (خود برنامه نصب‌شده می‌ماند).'
+  'sign-in is always the license username and password (menu 12).' = 'ورود همیشه با نام کاربری و رمز لایسنس است (گزینه ۱۲).'
+  '1) local only'                     = '۱) فقط این رایانه'
+  '2) internet (any device on your network / the internet)' = '۲) اینترنت (هر دستگاه در شبکه یا اینترنت)'
+  'saved: internet access on 0.0.0.0.' = 'ذخیره شد: دسترسی اینترنت روی 0.0.0.0.'
+  'saved: local only.'                = 'ذخیره شد: فقط این رایانه.'
+  'restart the dashboard now? (y/n)'  = 'داشبورد همین حالا ری‌استارت شود؟ (y/N)'
+  'this removes the dashboard app, config, service, task and shortcuts.' = 'با این کار برنامه، تنظیمات، اجرای خودکار و میان‌برهای داشبورد حذف می‌شوند.'
+  'nothing is changed in MetaTrader 5 or in the Expert Advisor.' = 'به MetaTrader 5 و اکسپرت هیچ تغییری داده نمی‌شود.'
+  'are you sure? type y to confirm'   = 'مطمئن هستید؟ برای تأیید y را بزنید'
+  'stop it and restart with the new settings? (y/n)' = 'متوقف شود و با تنظیمات جدید اجرا شود؟ (y/N)'
+  'error: could not reach GitHub to find the latest Expert version.' = 'خطا: برای یافتن آخرین نسخه اکسپرت به GitHub دسترسی نبود.'
+
+  # --- expert advisor -----------------------------------------------------
+  'error: could not determine the latest Expert version - check your internet connection.' = 'خطا: آخرین نسخه اکسپرت مشخص نشد — اتصال اینترنت را بررسی کنید.'
+  'error: no MetaTrader 5 data folder (MQL5) was found.' = 'خطا: پوشه داده MetaTrader 5 (MQL5) پیدا نشد.'
+  'hint: install MT5, run it once (File -> Open Data Folder), then retry.' = 'راهنما: MT5 را نصب و یک بار اجرا کنید (منوی File ← Open Data Folder) و دوباره تلاش کنید.'
+  'MQL5 folders found:'               = 'پوشه‌های MQL5 پیدا شده:'
+  'next steps in MetaTrader 5:'       = 'مراحل بعدی در MetaTrader 5:'
+  '1) restart MetaTrader 5'           = '۱) MetaTrader 5 را ری‌استارت کنید'
+  '2) allow DLL imports in the EA options' = '۲) در تنظیمات اکسپرت اجازه وارد کردن DLL را بدهید'
+  '3) attach the Mapsim Assistance Bot Expert to your chart' = '۳) اکسپرت Mapsim Assistance Bot را روی چارت خود بیندازید'
+  '4) enter your license (from the Mapsim Bot in Telegram)' = '۴) لایسنس خود را وارد کنید (از Mapsim Bot در تلگرام)'
+  'Expert Advisor: not installed through Mapsim_BOT' = 'اکسپرت: از طریق Mapsim_BOT نصب نشده'
+  '(could not check - no internet?)'  = '(بررسی نشد — اینترنت قطع است؟)'
+  'a newer version is available - install it now? (y/n)' = 'نسخه جدیدتری موجود است — همین حالا نصب شود؟ (y/N)'
+
+  # --- uninstall / bootstrap ---------------------------------------------
+  'Mapsim Live Dashboard removed completely (MT5 and the EA were not touched).' = 'Mapsim Live Dashboard کامل حذف شد (به MT5 و اکسپرت دست زده نشد).'
+  'public access: reachable from other devices on 0.0.0.0.' = 'دسترسی عمومی: از دستگاه‌های دیگر روی 0.0.0.0 در دسترس است.'
+  'sign in with the license username and password (menu 12).' = 'با نام کاربری و رمز لایسنس وارد شوید (گزینه ۱۲).'
+  'service removed.'                  = 'اجرای خودکار حذف شد.'
+  'note: the dashboard needs a valid Mapsim license before it runs.' = 'توجه: داشبورد پیش از اجرا به لایسنس معتبر Mapsim نیاز دارد.'
+  'open Mapsim_BOT and choose 12 (License).' = 'Mapsim_BOT را باز کنید و گزینه ۱۲ (لایسنس) را انتخاب کنید.'
+  'the dashboard was not started: a valid Mapsim license is required.' = 'داشبورد اجرا نشد: لایسنس معتبر Mapsim لازم است.'
+  'starting the dashboard (local mode) ...' = 'در حال اجرای داشبورد (حالت محلی) ...'
+  'auto-start task started again with the new version.' = 'اجرای خودکار با نسخه جدید دوباره اجرا شد.'
+  'stopping the manually started dashboard - the task will run it.' = 'داشبوردی که دستی اجرا شده بود متوقف می‌شود — اجرای خودکار آن را اجرا می‌کند.'
+}
+
+# Each rule matches the trimmed line and receives {0}, {1} ... for its groups.
+# The groups are translated by the same lookup before the rule text is built,
+# so "service    : installed, enabled, running" translates in one step and a new
+# value word only needs a dictionary entry, never a new rule.
+# Label rules come first, then the values they can contain.
+$script:FaRules = @(
+  # --- lines that look like a label but are not ---------------------------
+  @{ p = '^version\s*:\s*(.+)  \(update (.+) available - menu 4\)$'; r = 'نسخه: {0}  (بروزرسانی {1} موجود است — گزینه ۴)' }
+  @{ p = '^warning: this license expires in (\d+) day\(s\) - renew it soon\.$'; r = 'هشدار: این لایسنس تا {0} روز دیگر منقضی می‌شود — زودتر تمدید کنید.' }
+
+  # --- label : value lines ------------------------------------------------
+  @{ p = '^system\s*:\s*(.+)$'; r = 'سیستم: {0}' }
+  @{ p = '^app\s*:\s*(.+)$'; r = 'برنامه: {0}' }
+  @{ p = '^version\s*:\s*(.+)$'; r = 'نسخه: {0}' }
+  @{ p = '^dashboard\s*:\s*(.+)$'; r = 'داشبورد: {0}' }
+  @{ p = '^service\s*:\s*(.+)$'; r = 'اجرای خودکار: {0}' }
+  @{ p = '^bind\s*:\s*(.+)$'; r = 'آدرس اتصال: {0}' }
+  @{ p = '^license\s*:\s*(.+)$'; r = 'لایسنس: {0}' }
+  @{ p = '^disk\s*:\s*(.+)$'; r = 'دیسک: {0}' }
+  @{ p = '^firewall\s*:\s*(.+)$'; r = 'فایروال: {0}' }
+  @{ p = '^port (\d+)\s*:\s*(.+)$'; r = 'پورت {0}: {1}' }
+  @{ p = '^installed\s*:\s*(.+)$'; r = 'نصب‌شده: {0}' }
+  @{ p = '^enabled\s*:\s*(.+)$'; r = 'فعال: {0}' }
+  @{ p = '^running\s*:\s*(.+)$'; r = 'اجرا: {0}' }
+  @{ p = '^url\s*:\s*(.+)$'; r = 'آدرس: {0}' }
+  @{ p = '^logs\s*:\s*(.+)$'; r = 'لاگ‌ها: {0}' }
+  @{ p = '^user\s*:\s*(.+)$'; r = 'کاربر: {0}' }
+  @{ p = '^account\s*:\s*(.+)$'; r = 'حساب: {0}' }
+  @{ p = '^expires\s*:\s*(.+) \((\d+) day\(s\) left\)$'; r = 'انقضا: {0} ({1} روز باقی‌مانده)' }
+  @{ p = '^status\s*:\s*(.+) - (.+)$'; r = 'وضعیت: {0} — {1}' }
+  @{ p = '^warning\s*:\s*(.+)$'; r = 'هشدار: {0}' }
+  @{ p = '^installed version\s*:\s*(.+)$'; r = 'نسخه نصب‌شده: {0}' }
+  @{ p = '^last updated\s*:\s*(.+)$'; r = 'آخرین بروزرسانی: {0}' }
+  @{ p = '^latest version\s*:\s*(.+)$'; r = 'آخرین نسخه: {0}' }
+
+  # --- values inside those lines -----------------------------------------
+  @{ p = '^running \(pid (\d+)\)$'; r = 'در حال اجرا (شناسه {0})' }
+  @{ p = '^pid (\d+), port (\d+)$'; r = 'شناسه {0}، پورت {1}' }
+  @{ p = '^installed \((.+)\)$'; r = 'نصب‌شده ({0})' }
+  @{ p = '^installed, (.+), (.+)$'; r = 'نصب‌شده، {0}، {1}' }
+  @{ p = '^active - (.+), expires (.+)$'; r = 'فعال — {0}، انقضا {1}' }
+  @{ p = '^(.+) \((.*)\) - dashboard will not start$'; r = '{0} ({1}) — داشبورد اجرا نمی‌شود' }
+  @{ p = '^dashboard answering \(HTTP (\d+)\)$'; r = 'داشبورد پاسخ می‌دهد (HTTP {0})' }
+  @{ p = '^(.+) \(trimmed automatically above 256 KB\)$'; r = '{0} (بالای ۲۵۶ کیلوبایت خودکار کوتاه می‌شود)' }
+  @{ p = '^inbound rule for port (\d+) added$'; r = 'قاعده ورودی فایروال برای پورت {0} اضافه شد' }
+  @{ p = '^could not add a rule automatically - allow port (\d+) manually if needed$'; r = 'قاعده فایروال خودکار اضافه نشد — در صورت نیاز پورت {0} را دستی باز کنید' }
+
+  # --- one-line messages --------------------------------------------------
+  @{ p = '^internet \(0\.0\.0\.0\) - port (\d+)$'; r = 'اینترنت (0.0.0.0) — پورت {0}' }
+  @{ p = '^local only - port (\d+)$'; r = 'فقط این رایانه — پورت {0}' }
+  @{ p = '^current policy: (.+)$'; r = 'روش بروزرسانی فعلی: {0}' }
+  @{ p = '^current bind: (.+)$'; r = 'آدرس اتصال فعلی: {0}' }
+  @{ p = '^port (\d+) is busy\.$'; r = 'پورت {0} آزاد نیست.' }
+  @{ p = '^port (\d+) is already used by another program\.$'; r = 'پورت {0} را برنامه دیگری استفاده می‌کند.' }
+  @{ p = '^error: port (\d+) is already used by another program\.$'; r = 'خطا: پورت {0} را برنامه دیگری استفاده می‌کند.' }
+  @{ p = '^note: port (\d+) is busy, using (\d+)\.$'; r = 'توجه: پورت {0} آزاد نبود، از پورت {1} استفاده می‌شود.' }
+  @{ p = '^dashboard is up: (.+)$'; r = 'داشبورد اجرا شد: {0}' }
+  @{ p = '^it did not answer on port (\d+) - see status \(1\)\.$'; r = 'روی پورت {0} پاسخ نداد — وضعیت (گزینه ۱) را ببینید.' }
+  @{ p = '^the dashboard did not answer on port (\d+); see (.+)$'; r = 'داشبورد روی پورت {0} پاسخ نداد؛ {1} را ببینید.' }
+  @{ p = '^the dashboard is already running \(pid (\d+), port (\d+), bind (.+)\)\.$'; r = 'داشبورد از قبل در حال اجراست (شناسه {0}، پورت {1}، آدرس اتصال {2}).' }
+  @{ p = '^the dashboard is already running \(pid (\d+)\)\.$'; r = 'داشبورد از قبل در حال اجراست (شناسه {0}).' }
+  @{ p = '^dashboard stopped \(pids: (.+)\)\.$'; r = 'داشبورد متوقف شد (شناسه‌ها: {0}).' }
+  @{ p = '^latest release: (.+)$'; r = 'آخرین انتشار: {0}' }
+  @{ p = '^update available: (.+) -> (.+) \(menu 4 installs it\)$'; r = 'بروزرسانی موجود است: {0} ← {1} (گزینه ۴ نصب می‌کند)' }
+  @{ p = '^dashboard update available: (.+) -> (.+) \(menu 4 installs it\)$'; r = 'بروزرسانی داشبورد موجود است: {0} ← {1} (گزینه ۴ نصب می‌کند)' }
+  @{ p = '^automatic update: (.+) -> (.+)$'; r = 'بروزرسانی خودکار: {0} ← {1}' }
+  @{ p = '^version (\d[\d.]*) is already installed - reinstall\? \(y/n\)$'; r = 'نسخه {0} از قبل نصب است — دوباره نصب شود؟ (y/N)' }
+  @{ p = '^latest Expert version: (.+)$'; r = 'آخرین نسخه اکسپرت: {0}' }
+  @{ p = '^downloading Expert (.+) \.\.\.$'; r = 'در حال دانلود اکسپرت {0} ...' }
+  @{ p = '^note: no Windows build found - using (.+)$'; r = 'توجه: نسخه ویندوزی پیدا نشد — از {0} استفاده می‌شود.' }
+  @{ p = '^choose 1-(\d+) \(or ''a'' for all\)$'; r = 'یک شماره از ۱ تا {0} (یا ''a'' برای همه)' }
+  @{ p = '^done\. From now on manage everything with:\s*(.+)$'; r = 'تمام شد. از این پس همه چیز را با این دستور مدیریت کنید:  {0}' }
+  @{ p = '^the dashboard was not (.+)-ed\.$'; r = 'داشبورد {0} نشد.' }
+
+  # --- numbers ------------------------------------------------------------
+  @{ p = '^(\S+)\s+([\d.,]+) GB free of\s+([\d.,]+) GB\s+\((\d+)% used\)\s*(.*)$'; r = '{0}   {1} گیگابایت آزاد از {2} گیگابایت ({3}٪ مصرف)   {4}' }
+  @{ p = '^([\d.,]+) GB free of ([\d.,]+) GB \((\d+)% used\)$'; r = '{0} گیگابایت آزاد از {1} گیگابایت ({2}٪ مصرف)' }
+  @{ p = '^([\d.,]+) GB free of ([\d.,]+) GB$'; r = '{0} گیگابایت آزاد از {1} گیگابایت' }
+  @{ p = '^log ([\d.,]+) MB\s+(.+)$'; r = 'لاگ {0} مگابایت   {1}' }
+  @{ p = '^([\d.,]+) MB\s+(.+)$'; r = '{0} مگابایت   {1}' }
+)
+
+function Find-FaText([string]$Text) {
+  return Find-FaTextDepth $Text 0
+}
+
+# A string with no entry and no matching rule is printed unchanged, so the two
+# languages always run exactly the same code path.
+function Find-FaTextDepth([string]$Text, [int]$Depth) {
+  if ($script:MapsimLang -ne 'fa' -or [string]::IsNullOrWhiteSpace($Text)) { return $Text }
+  if ($Text -match '[\u0600-\u06FF]') { return $Text }
+  if ($Text -notmatch '[A-Za-z]') { return $Text }
+  $lead = [regex]::Match($Text, '^\s*').Value
+  $trail = [regex]::Match($Text, '\s*$').Value
+  $core = $Text.Substring($lead.Length, $Text.Length - $lead.Length - $trail.Length)
+  if (-not $core) { return $Text }
+  if ($script:FaText.ContainsKey($core)) { return $lead + $script:FaText[$core] + $trail }
+  foreach ($rule in $script:FaRules) {
+    if ($core -match $rule.p) {
+      $values = @()
+      for ($i = 1; $i -lt $Matches.Count; $i++) { $values += [string]$Matches[$i] }
+      if ($Depth -lt 2) {
+        for ($i = 0; $i -lt $values.Count; $i++) { $values[$i] = Find-FaTextDepth $values[$i] ($Depth + 1) }
+      }
+      try { return $lead + ([string]::Format($rule.r, $values)) + $trail } catch { return $Text }
+    }
+  }
+  $word = $core.ToLowerInvariant()
+  if ($script:FaWord.ContainsKey($word)) { return $lead + $script:FaWord[$word] + $trail }
+  return $Text
+}
+
+# Translation-aware Write-Host. Colour and -NoNewline are forwarded untouched, so
+# every call site keeps its exact behaviour; only the visible text is swapped.
+# In the Persian window the same line is painted into the log instead of the
+# console (see "window host" near the end of this file).
+function Write-Host {
+  [CmdletBinding()]
+  param(
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
+    [object[]]$Object,
+    [switch]$NoNewline,
+    [object]$Separator,
+    [System.ConsoleColor]$ForegroundColor,
+    [System.ConsoleColor]$BackgroundColor
+  )
+  $converted = @()
+  foreach ($item in $Object) {
+    if ($item -is [string]) { $converted += (Find-FaText $item) } else { $converted += $item }
+  }
+  if ($script:GuiHost) {
+    $glue = ' '
+    if ($PSBoundParameters.ContainsKey('Separator')) { $glue = [string]$Separator }
+    $line = (@($converted | ForEach-Object { [string]$_ }) -join $glue)
+    $tint = $null
+    if ($PSBoundParameters.ContainsKey('ForegroundColor')) { $tint = $ForegroundColor }
+    Write-GuiLine $line ([bool]$NoNewline) $tint
+    return
+  }
+  $forward = @{}
+  if ($PSBoundParameters.ContainsKey('Separator')) { $forward['Separator'] = $Separator }
+  if ($PSBoundParameters.ContainsKey('ForegroundColor')) { $forward['ForegroundColor'] = $ForegroundColor }
+  if ($PSBoundParameters.ContainsKey('BackgroundColor')) { $forward['BackgroundColor'] = $BackgroundColor }
+  if ($NoNewline) { $forward['NoNewline'] = $true }
+  Microsoft.PowerShell.Utility\Write-Host -Object $converted @forward
+}
+
+# Clear-Host belongs to the host as well: the window empties its log.
+function Clear-Host {
+  if ($script:GuiHost) { Clear-GuiScreen; return }
+  try { [System.Console]::Clear() } catch { }
+}
+
+# An answer is tidied, never rewritten when it is secret: a Persian keyboard types
+# ۱ ۲ ۳ where the menu compares 1 2 3, so those digits are mapped to the plain
+# ones, and بله / خیر are accepted instead of y / n. Passwords and the license code
+# are returned exactly as typed.
+function ConvertFrom-MenuAnswer([string]$Text) {
+  $sb = New-Object System.Text.StringBuilder
+  foreach ($ch in ([string]$Text).ToCharArray()) {
+    $code = [int]$ch
+    if ($code -ge 0x06F0 -and $code -le 0x06F9) { [void]$sb.Append([char](0x30 + $code - 0x06F0)) }
+    elseif ($code -ge 0x0660 -and $code -le 0x0669) { [void]$sb.Append([char](0x30 + $code - 0x0660)) }
+    else { [void]$sb.Append($ch) }
+  }
+  $answer = $sb.ToString().Trim()
+  switch -Regex ($answer) {
+    '^(y|Y|yes|Yes|YES)$|^(بله|بلی|بلي|آره|اره)$' { return 'y' }
+    '^(n|N|no|No|NO)$|^(خیر|نه)$' { return 'n' }
+  }
+  return $answer
+}
+
+# The reverse of the digit mapping above, for text that is only shown: a Persian
+# list is numbered ۱ ۲ ۳, and typing either form is accepted.
+function ConvertTo-FaDigits([string]$Text) {
+  $sb = New-Object System.Text.StringBuilder
+  foreach ($ch in ([string]$Text).ToCharArray()) {
+    $code = [int]$ch
+    if ($code -ge 0x30 -and $code -le 0x39) { [void]$sb.Append([char](0x06F0 + $code - 0x30)) }
+    else { [void]$sb.Append($ch) }
+  }
+  return $sb.ToString()
+}
+
+# Translation-aware Read-Host. Only the prompt is translated; the answer goes back
+# to the same switch statements, so numbers, y/n and the license behave the same in
+# both languages and in both hosts.
+function Read-Host {
+  [CmdletBinding()]
+  param(
+    [Parameter(Position = 0)]
+    [object]$Prompt,
+    [switch]$AsSecureString,
+    [switch]$MaskInput
+  )
+  $text = $Prompt
+  if ($text -is [string]) { $text = Find-FaText $text }
+  $secret = [bool]($AsSecureString -or $MaskInput)
+  if ($script:GuiHost) {
+    $answer = Read-GuiLine ([string]$text).Trim() $secret
+    if ($AsSecureString) {
+      # An empty answer stays an empty secure string: ConvertTo-SecureString
+      # refuses an empty string, and the license prompt must accept nothing.
+      if (-not $answer) { return (New-Object System.Security.SecureString) }
+      return (ConvertTo-SecureString -String $answer -AsPlainText -Force)
+    }
+    if ($secret) { return $answer }
+    return (ConvertFrom-MenuAnswer $answer)
+  }
+  $forward = @{}
+  if ($AsSecureString) { $forward['AsSecureString'] = $true }
+  if ($MaskInput) { $forward['MaskInput'] = $true }
+  if ([string]::IsNullOrEmpty([string]$text)) { $answer = Microsoft.PowerShell.Utility\Read-Host @forward }
+  else { $answer = Microsoft.PowerShell.Utility\Read-Host -Prompt $text @forward }
+  if ($secret) { return $answer }
+  return (ConvertFrom-MenuAnswer $answer)
+}
 $UpdateCacheTtl = 21600
 $script:UpdateInstalled = ''
 $script:UpdateLatest = ''
@@ -337,7 +798,9 @@ function Test-DashboardUp([int]$Port) {
 }
 
 function Write-Shim {
-  $cmd = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$MenuPath`" %*"
+  # MAPSIM_MENU_SHIM tells the menu the console window belongs to this shim, so
+  # the Persian window may hide it once it is on screen.
+  $cmd = "@echo off`r`nset MAPSIM_MENU_SHIM=1`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$MenuPath`" %*"
   Set-Content -Path $ShimPath -Value $cmd -Encoding ASCII
   $desktop = [Environment]::GetFolderPath('Desktop')
   $shortcut = Join-Path $desktop 'Mapsim BOT.lnk'
@@ -740,7 +1203,7 @@ function Show-UpdatePolicyMenu {
 }
 
 function Read-Default([string]$Prompt, [string]$Default) {
-  $a = Read-Host "$Prompt [$Default]"
+  $a = Read-Host "$(Find-FaText $Prompt) [$Default]"
   if ([string]::IsNullOrWhiteSpace($a)) { return $Default }
   return $a
 }
@@ -776,12 +1239,31 @@ function Show-Title {
   Write-Host ($Magenta + '    ##   ## ##   ## ##      ######  ####### ##   ##  ######   #####    ###  '.Replace('#', $BlockCh) + $NoColor)
 }
 
-function Ui-Top    { Write-Host ($Cyan + $BoxTL + ($BoxH * 79) + $BoxTR + $NoColor) }
-function Ui-Sep    { Write-Host ($Cyan + $BoxL  + ($BoxH * 79) + $BoxR  + $NoColor) }
-function Ui-Bottom { Write-Host ($Cyan + $BoxBL + ($BoxH * 79) + $BoxBR + $NoColor) }
+# Persian is written right to left and the letters join, so a padded cell of a
+# fixed width cannot line up. In Persian the frame keeps its horizontal rules but
+# the rows and items drop the two vertical bars and the padding; the text itself
+# is the same, only the box around it changes.
+function Ui-Top {
+  if ($script:MapsimLang -eq 'fa') { Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return }
+  Write-Host ($Cyan + $BoxTL + ($BoxH * 79) + $BoxTR + $NoColor)
+}
+function Ui-Sep {
+  if ($script:MapsimLang -eq 'fa') { Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return }
+  Write-Host ($Cyan + $BoxL + ($BoxH * 79) + $BoxR + $NoColor)
+}
+function Ui-Bottom {
+  if ($script:MapsimLang -eq 'fa') { Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return }
+  Write-Host ($Cyan + $BoxBL + ($BoxH * 79) + $BoxBR + $NoColor)
+}
 
 function Ui-Row([string]$Label, [string]$Plain, [string]$Colored) {
   if (-not $Colored) { $Colored = $Plain }
+  if ($script:MapsimLang -eq 'fa') {
+    $faLabel = Find-FaText $Label
+    $faValue = Find-FaText $Plain
+    Write-Host ('  ' + $faLabel + ': ' + $Colored.Replace($Plain, $faValue))
+    return
+  }
   $body = '{0,-10}: {1}' -f $Label, $Colored
   $plainBody = '{0,-10}: {1}' -f $Label, $Plain
   $pad = 79 - 2 - $plainBody.Length
@@ -790,6 +1272,11 @@ function Ui-Row([string]$Label, [string]$Plain, [string]$Colored) {
 }
 
 function Ui-Item([string]$Num, [string]$Text) {
+  $faText = Find-FaText $Text
+  if ($script:MapsimLang -eq 'fa') {
+    Write-Host ('   ' + $Magenta + (ConvertTo-FaDigits ('{0,2}' -f $Num)) + $NoColor + ' - ' + $White + $faText + $NoColor)
+    return
+  }
   Write-Host ($Cyan + $BoxV + $NoColor + '   ' + $Magenta + ('{0,2}' -f $Num) + $NoColor + ' - ' + $White + ('{0,-71}' -f $Text) + $NoColor + $Cyan + $BoxV + $NoColor)
 }
 
@@ -973,6 +1460,8 @@ function Show-Menu {
     Ui-Row 'License' $licPlain $licCol
     Ui-Row 'Access' $acc ($Cyan + $acc + $NoColor)
     Ui-Row 'Disk' $diskLine ($diskCol + $diskLine + $NoColor)
+    if ($script:MapsimLang -eq 'fa') { $langPlain = 'Persian' } else { $langPlain = 'English' }
+    Ui-Row 'Language' $langPlain ($Cyan + $langPlain + $NoColor)
     Ui-Sep
     Ui-Item '1' 'Status'
     Ui-Item '2' 'Start dashboard'
@@ -988,6 +1477,7 @@ function Show-Menu {
     Ui-Item '12' 'License (dashboard login)'
     Ui-Item '13' 'Update policy (notify / auto / off)'
     Ui-Item '14' 'Exit'
+    Ui-Item 'L' 'Language: FA'
     Ui-Bottom
     $c = Read-Host "`nEnter Number Of List"
     switch ($c) {
@@ -1059,7 +1549,23 @@ function Show-Menu {
       '12' { Show-LicenseMenu }
       '13' { Show-UpdatePolicyMenu }
       '14' { Write-Host 'bye.'; return }
-      default { Write-Host 'please choose 1-14.' }
+      'l' {
+        if ($script:MapsimLang -eq 'fa') { $script:MapsimLang = 'en' } else { $script:MapsimLang = 'fa' }
+        New-Item -ItemType Directory -Force $ConfigDir | Out-Null
+        Set-Content -Path $MenuLangFile -Value $script:MapsimLang -Encoding ASCII
+        if ($script:MapsimLang -eq 'fa') {
+          # Switching to Persian in a console session must open the window now:
+          # a console cannot draw Persian, so it must never fall back to one.
+          Initialize-MapsimHost
+          if ($script:GuiHost -and $script:GuiButton) { try { $script:GuiButton.Text = 'تأیید' } catch { } }
+          Write-Host 'زبان فارسی فعال شد.'
+        } else {
+          if ($script:GuiHost -and $script:GuiButton) { try { $script:GuiButton.Text = 'OK' } catch { } }
+          Write-Host 'English is active.'
+        }
+        continue
+      }
+      default { Write-Host 'please choose 1-14 or L.' }
     }
     $null = Read-Host "`nPress Enter to continue"
   }
@@ -1213,6 +1719,303 @@ function Uninstall-Everything {
   Write-Host 'Mapsim Live Dashboard removed completely (MT5 and the EA were not touched).'
 }
 
+# ---------------------------------------------------------------- window host
+# Why a window at all: a console cannot join Persian letters and orders a line
+# that mixes Persian, digits and English words run by run from the left, so the
+# sentence comes out scrambled on Windows 10, 11 and Server alike whichever font
+# is set. The window is the same menu drawn by a text engine that shapes and
+# orders it: the overridden Write-Host paints into a rich-text log, Read-Host
+# waits for a text box, Clear-Host empties the log, so no menu function changes -
+# only where its text lands. English keeps the console, and MAPSIM_MENU_CONSOLE=1
+# (or -Console) keeps it for Persian as well.
+$script:GuiHost = $false
+$script:GuiAlive = $false
+$script:GuiClosed = $false
+$script:GuiAnswer = $null
+$script:GuiPending = ''
+$script:GuiSnapTaken = $false
+$script:GuiSnapshot = $env:MAPSIM_MENU_SNAPSHOT
+
+# Any machine that can run the dashboard also has Segoe UI or Tahoma, both of
+# which shape Persian, so the window never needs a font file installed; a bundled
+# Persian face is used when the user already has one.
+function Get-GuiFontFamily {
+  $wanted = @('Vazirmatn', 'Vazir', 'IRANSansX', 'IRANSans', 'IRANYekan', 'Sahel', 'Shabnam', 'Segoe UI', 'Tahoma')
+  $names = @()
+  try {
+    $fonts = New-Object System.Drawing.Text.InstalledFontCollection
+    $names = @($fonts.Families | ForEach-Object { $_.Name })
+  } catch { }
+  foreach ($name in $wanted) { if ($names -contains $name) { return $name } }
+  return 'Segoe UI'
+}
+
+# The console colours (30-37) on a dark log; the palette is the same as the
+# console one so a red line still means the same thing.
+function Get-GuiColor([object]$Code, [string]$Fallback = '#E6EDF3') {
+  $key = -1
+  [void][int]::TryParse([string]$Code, [ref]$key)
+  switch ($key) {
+    31 { return '#FF7B72' }
+    32 { return '#7EE787' }
+    33 { return '#E3B341' }
+    34 { return '#79C0FF' }
+    35 { return '#D2A8FF' }
+    36 { return '#56D4DD' }
+    37 { return '#E6EDF3' }
+  }
+  return $Fallback
+}
+
+function Get-GuiTintCode([object]$Tint) {
+  switch ([string]$Tint) {
+    'Red' { return 31 }
+    'Green' { return 32 }
+    'Yellow' { return 33 }
+    'Blue' { return 34 }
+    'Magenta' { return 35 }
+    'Cyan' { return 36 }
+    'White' { return 37 }
+    'Gray' { return 37 }
+  }
+  return 0
+}
+
+function Add-GuiRun([string]$Text, [string]$Hex) {
+  $log = $script:GuiLog
+  $log.SelectionStart = $log.TextLength
+  $log.SelectionLength = 0
+  $log.SelectionColor = [System.Drawing.ColorTranslator]::FromHtml($Hex)
+  $log.AppendText($Text)
+}
+
+function Clear-GuiScreen {
+  if (-not $script:GuiHost -or -not $script:GuiAlive) { return }
+  try { $script:GuiLog.Clear(); $script:GuiPending = '' } catch { }
+}
+
+function Write-GuiLine([string]$Text, [bool]$NoNewline, [object]$Tint) {
+  if (-not $script:GuiHost -or -not $script:GuiAlive) { return }
+  if ($null -eq $Text) { $Text = '' }
+  if ($script:GuiPending) { $Text = $script:GuiPending + $Text; $script:GuiPending = '' }
+  if ($NoNewline) { $script:GuiPending = $Text; return }
+  $log = $script:GuiLog
+  # The console padded a label with spaces to line its colon up; a proportional
+  # font does not need that and the gap reads as a hole inside the sentence.
+  if ($Text -match '[\u0600-\u06FF]') {
+    $Text = (($Text.TrimEnd() -replace '[ \t]{2,}', ' ') -replace ' +:', ':')
+  }
+  $fa = $Text -match '[\u0600-\u06FF]'
+  $base = Get-GuiColor -Code (Get-GuiTintCode $Tint)
+  if ($log.TextLength -gt 150000) {
+    try {
+      $log.ReadOnly = $false
+      $log.Select(0, 40000)
+      $log.SelectedText = ''
+      $log.ReadOnly = $true
+    } catch { }
+  }
+  $log.SelectionStart = $log.TextLength
+  $log.SelectionLength = 0
+  # A paragraph carries one alignment: Persian sentences read from the right,
+  # paths, URLs and the box rules stay on the left.
+  $log.SelectionAlignment = $(if ($fa) { 'Right' } else { 'Left' })
+  $log.SelectionFont = $(if ($Text -match '[\u2588\u2500-\u254B]') { $script:GuiMono } else { $script:GuiFont })
+  $cursor = 0
+  foreach ($m in [regex]::Matches($Text, "$([char]27)\[([0-9;]*)m")) {
+    if ($m.Index -gt $cursor) { Add-GuiRun $Text.Substring($cursor, $m.Index - $cursor) $base }
+    $parts = $m.Groups[1].Value.Split(';')
+    $code = 0
+    [void][int]::TryParse($parts[$parts.Count - 1], [ref]$code)
+    if ($code -eq 0) { $base = Get-GuiColor -Code (Get-GuiTintCode $Tint) }
+    else { $base = Get-GuiColor -Code $code -Fallback $base }
+    $cursor = $m.Index + $m.Length
+  }
+  if ($cursor -lt $Text.Length) { Add-GuiRun $Text.Substring($cursor) $base }
+  Add-GuiRun "`n" (Get-GuiColor -Code 0 -Fallback '#E6EDF3')
+  $log.SelectionStart = $log.TextLength
+  $log.ScrollToCaret()
+  # Keep the window painted while a download or a service call blocks the script.
+  [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Save-GuiSnapshot {
+  # Diagnostics only (MAPSIM_MENU_SNAPSHOT): a screen grab of the window plus the
+  # plain text it holds, so the log can be checked without a person looking at it.
+  try {
+    $form = $script:GuiForm
+    # A screen grab only shows the window while it is on top.
+    $wasTop = [bool]$form.TopMost
+    $form.TopMost = $true
+    try { $form.Activate() } catch { }
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 300
+    $bounds = $form.Bounds
+    $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+    $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+    try { $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size) }
+    catch { $form.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle(0, 0, $bounds.Width, $bounds.Height))) }
+    $graphics.Dispose()
+    $bmp.Save($script:GuiSnapshot, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+    $form.TopMost = $wasTop
+    $log = $script:GuiLog
+    $dump = @("chars : $($log.TextLength)", "lines : $($log.Lines.Count)", '--- text ---') + @($log.Lines)
+    [IO.File]::WriteAllLines("$($script:GuiSnapshot).txt", $dump, (New-Object System.Text.UTF8Encoding($false)))
+  } catch {
+    try { [IO.File]::AppendAllText("$($script:GuiSnapshot).err", $_.Exception.Message) } catch { }
+  }
+}
+
+function Read-GuiLine([string]$Prompt, [bool]$Secret) {
+  if (-not $script:GuiAlive) { exit }
+  if ($Prompt) { Write-GuiLine $Prompt $false $null }
+  $script:GuiAnswer = $null
+  $script:GuiInput.Text = ''
+  $script:GuiInput.UseSystemPasswordChar = $Secret
+  $script:GuiPanel.Visible = $true
+  [void]$script:GuiInput.Focus()
+  $tick = [Environment]::TickCount
+  while ($null -eq $script:GuiAnswer) {
+    if (-not $script:GuiAlive) { exit }
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 20
+    if ($script:GuiSnapshot -and -not $script:GuiSnapTaken -and (([Environment]::TickCount - $tick) -gt 600)) {
+      $script:GuiSnapTaken = $true
+      Save-GuiSnapshot
+      exit
+    }
+  }
+  $answer = [string]$script:GuiAnswer
+  $script:GuiAnswer = $null
+  $script:GuiInput.UseSystemPasswordChar = $false
+  $script:GuiPanel.Visible = $false
+  [System.Windows.Forms.Application]::DoEvents()
+  return $answer
+}
+
+function Initialize-MapsimHost {
+  if ($script:GuiHost) { return }
+  if ($script:MapsimLang -ne 'fa') { return }
+  if ($Console -or $env:MAPSIM_MENU_CONSOLE -eq '1') {
+    # Asked to stay in the console: say so in Persian, then draw text only.
+    Write-Host 'note: Persian needs the window; press L and choose English for the console.'
+    return
+  }
+  try {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $family = Get-GuiFontFamily
+    try { $script:GuiFont = New-Object System.Drawing.Font($family, 11.5) }
+    catch { $script:GuiFont = New-Object System.Drawing.Font('Segoe UI', 11.5) }
+    try { $script:GuiMono = New-Object System.Drawing.Font('Consolas', 10.5) }
+    catch { $script:GuiMono = $script:GuiFont }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Mapsim BOT'
+    $form.ClientSize = New-Object System.Drawing.Size(940, 740)
+    $form.MinimumSize = New-Object System.Drawing.Size(720, 520)
+    $form.StartPosition = 'CenterScreen'
+    $form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#14161B')
+    $form.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#E6EDF3')
+    $form.Font = $script:GuiFont
+    $form.RightToLeft = 'Yes'
+    $form.RightToLeftLayout = $true
+
+    $log = New-Object System.Windows.Forms.RichTextBox
+    $log.Dock = 'Fill'
+    $log.ReadOnly = $true
+    $log.BorderStyle = 'None'
+    $log.WordWrap = $true
+    # No scrollbar: an RTL RichTextBox paints its scrollbar over the left end of
+    # the text, and the log already follows the caret at the end of every line.
+    $log.ScrollBars = 'None'
+    $log.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#14161B')
+    $log.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#E6EDF3')
+    $log.Font = $script:GuiFont
+    $log.RightToLeft = 'Yes'
+    $log.DetectUrls = $false
+
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.Dock = 'Bottom'
+    $panel.Height = 58
+    $panel.Padding = New-Object System.Windows.Forms.Padding(12, 10, 12, 10)
+    $panel.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#1B1F26')
+    $panel.Visible = $false
+
+    $grid = New-Object System.Windows.Forms.TableLayoutPanel
+    $grid.Dock = 'Fill'
+    $grid.ColumnCount = 2
+    $grid.RowCount = 1
+    [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 110)))
+
+    $input = New-Object System.Windows.Forms.TextBox
+    $input.Dock = 'Fill'
+    $input.BorderStyle = 'FixedSingle'
+    $input.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#0F1115')
+    $input.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#E6EDF3')
+    $input.Font = $script:GuiFont
+    $input.RightToLeft = 'Yes'
+    $input.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 0)
+
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Dock = 'Fill'
+    $ok.Text = 'تأیید'
+    $ok.FlatStyle = 'Flat'
+    $ok.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#2F6FEB')
+    $ok.ForeColor = [System.Drawing.Color]::White
+    $ok.Font = $script:GuiFont
+
+    [void]$grid.Controls.Add($input, 0, 0)
+    [void]$grid.Controls.Add($ok, 1, 0)
+    [void]$panel.Controls.Add($grid)
+    [void]$form.Controls.Add($log)
+    [void]$form.Controls.Add($panel)
+    $form.AcceptButton = $ok
+
+    $ok.Add_Click({
+      if ($null -eq $script:GuiAnswer) { $script:GuiAnswer = $script:GuiInput.Text }
+    })
+    $form.Add_FormClosing({
+      $script:GuiClosed = $true
+      $script:GuiAlive = $false
+      if ($null -eq $script:GuiAnswer) { $script:GuiAnswer = '' }
+    })
+
+    $script:GuiForm = $form
+    $script:GuiLog = $log
+    $script:GuiPanel = $panel
+    $script:GuiInput = $input
+    $script:GuiButton = $ok
+    $script:GuiAlive = $true
+    $script:GuiHost = $true
+    $form.Show()
+    [System.Windows.Forms.Application]::DoEvents()
+    $form.Activate()
+
+    # The shim owns the console window it opened, so it is hidden once the menu
+    # has a window of its own; started from an existing terminal the console is
+    # left alone.
+    if ($env:MAPSIM_MENU_SHIM -eq '1') {
+      try {
+        if (-not ('Mapsim.ConsoleHost' -as [type])) {
+          Add-Type -Namespace Mapsim -Name ConsoleHost -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
+        }
+        $handle = [Mapsim.ConsoleHost]::GetConsoleWindow()
+        if ($handle -ne [IntPtr]::Zero) { [void][Mapsim.ConsoleHost]::ShowWindow($handle, 0) }
+      } catch { }
+    }
+  } catch {
+    $script:GuiHost = $false
+    $script:GuiAlive = $false
+    Write-Host 'note: the Persian window could not be opened; the menu continues in this console.'
+    Write-Host 'note: Persian needs the window; press L and choose English for the console.'
+  }
+}
+
 # ------------------------------------------------------------------ entrypoint
 
 if ($Uninstall) { Uninstall-Everything; return }
@@ -1265,4 +2068,6 @@ if ($Bootstrap) {
   return
 }
 
+Initialize-MapsimHost
 Show-Menu
+if ($script:GuiHost) { try { $script:GuiForm.Close() } catch { } }

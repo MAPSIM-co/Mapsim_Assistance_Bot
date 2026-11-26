@@ -145,6 +145,12 @@ you can copy it), whether the live snapshot file is being read
  14) Update policy (notify/auto/off)- how a newer dashboard release is handled
                                      (see **Dashboard updates** below)
  15) Exit
+  L) Language (FA / EN)           - switches the menu and the panel between
+                                     English and Persian; the item names the
+                                     language you switch TO (`Language: FA` in
+                                     the English menu, `زبان: EN` in the Persian
+                                     one), and the choice is saved per user and
+                                     survives an update
 
 The Windows menu (`mapsim-menu.ps1`) has no separate snapshot item, so the
 numbering there shifts up by one: **12) License (dashboard login)**,
@@ -295,6 +301,64 @@ The installer flags still work when the installer file is run directly
 No Python installation is required.
 
 ---
+
+## Language (English / فارسی)
+
+The dashboard and the `Mapsim_BOT` control center both speak English and
+Persian. The two languages share one code path - no logic, no calculation and
+no trading value differs between them; only the visible text is swapped.
+
+**Dashboard (web page).** The `EN` / `FA` pill in the masthead switches the
+language instantly. The pill always names the language it switches **to**, not
+the one already on screen: it reads `FA` while the page is English and `EN`
+while it is Persian, and the tooltip says the same thing, so the button never
+offers the language you are already reading. The choice is stored in the browser
+(`mapsim.lang`), so the next visit opens in the same language. In Persian the
+page switches to `dir="rtl"`, uses a Persian font stack (Vazirmatn, IRANSansX,
+IRANSans, Segoe UI, Tahoma) and normalises letter spacing, so nothing is clipped
+or reversed.
+
+**Control center (its own window).** Press **L** in the main menu (or pick the
+`Language` item) to toggle between English and Persian. The item follows the
+same rule as the web pill - it shows the language you are about to switch to,
+`Language: FA` in the English menu and `زبان: EN` in the Persian one, while the
+`Language` row of the panel keeps showing the language in use. The choice is
+saved in `%APPDATA%\MapsimDashboard\dashboard-lang` on Windows and is read on
+the next start; the panel is redrawn in the selected language.
+
+In Persian the control center opens a small window of its own instead of
+drawing into the console. A Windows console cannot do either half of Persian
+typography - it shows every letter on its own and it lays a line that mixes
+Persian with numbers and English words out piece by piece from the left - so the
+sentence reads scrambled in Windows 10, Windows 11, Windows Server and in every
+font, and no console setting fixes it. The window keeps the same menu code and
+paints it into a right-to-left log with an input box and a `تأیید` button, so
+only the destination of the text changes. It picks the first font it finds from
+Vazirmatn, Vazir, IRANSansX, IRANSans, IRANYekan, Sahel, Shabnam, Segoe UI and
+Tahoma - all of them shape Persian - so nothing has to be installed. Persian
+lines are right-aligned and the Persian sentences wrap normally; the menu is
+numbered `۱` to `۱۴`, and answers typed with a Persian keyboard (`۱`, `۲`, and
+بله / خیر for yes / no) are understood everywhere the menu asks for a number or
+a y/n. If the window cannot be opened, the menu says so and stays usable in the
+console.
+
+English is unchanged: it still runs in the console with the same box frame and
+the same layout as before. `-Console` (or `MAPSIM_MENU_CONSOLE=1`) forces the
+console even for Persian, for terminals such as Windows Terminal that can render
+the text themselves.
+
+**What stays in English.** Anything that is an original name rather than a
+label is never translated: symbols and tickers, Expert Advisor input names, CSV
+rule names, log lines and log categories, file paths, JSON field names,
+account/ticket numbers and the standard trading jargon the EA prints. A line
+with no dictionary entry is printed exactly as the English build prints it, so
+a string that is not translated yet can never look broken.
+
+**Adding a language string.** Every new page, card or field only needs one line
+in `web/i18n.fa.js` (`"English text": "متن فارسی"`); composed sentences
+(`"Session: ASIA · closed"`) use the ordered pattern list in the same file. The
+menu uses the same idea: an entry in the `FaText` table in `mapsim-menu.ps1`,
+and a pattern in `FaRules` when the line mixes fixed text with live values.
 
 ## Access the dashboard from the internet
 
