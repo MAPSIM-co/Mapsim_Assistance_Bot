@@ -24,17 +24,17 @@ jobs:
   build:
     name: ${{ matrix.variant }} ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
-    # A tag builds only the variant it names. Building both on every tag meant a
-    # `free` branch that trails the release cycle stopped the licensed release:
-    # its version check below fails, `build` reports failure, and the publish job
-    # is skipped. A manual run still builds both.
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (startsWith(github.ref, 'refs/tags/dashboard-free-v') && matrix.variant == 'free') ||
-      (startsWith(github.ref, 'refs/tags/dashboard-v') && matrix.variant == 'licensed')
     strategy:
       fail-fast: false
       matrix:
+        # A tag builds only the variant it names. Building both on every tag let
+        # a `free` branch that trails the release cycle stop the licensed
+        # release: its version check below fails, `build` reports failure and the
+        # publish job is skipped. The variant is a matrix axis, not a job-level
+        # if, because jobs.<id>.if is evaluated before the matrix exists. A
+        # manual run still builds both.
+        variant: ${{ (github.event_name == 'workflow_dispatch' && fromJSON('["licensed","free"]')) || (startsWith(github.ref, 'refs/tags/dashboard-free-v') && fromJSON('["free"]')) || fromJSON('["licensed"]') }}
+        os: [macos-latest, macos-15-intel, windows-latest, ubuntu-22.04]
         include:
           - os: macos-latest
             label: macos-arm64
