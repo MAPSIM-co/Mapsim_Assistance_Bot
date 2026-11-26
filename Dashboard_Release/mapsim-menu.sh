@@ -14,6 +14,12 @@ set -u
 
 REPO="MAPSIM-co/Mapsim_Assistance_Bot"
 FALLBACK_VERSION="dashboard-v1.0.9"
+# Bumped whenever this file changes in a way an installed copy must pick up.
+# install.sh runs once and a dashboard update never touches this file, so the
+# menu refreshes itself from GitHub (refresh_menu_self) instead of staying at
+# whatever version happened to be downloaded that first time.
+MENU_VERSION=1.1.0
+MENU_URL="https://raw.githubusercontent.com/$REPO/main/Dashboard_Release/mapsim-menu.sh"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
 CONFIG_DIR="$HOME/.config/mapsim-dashboard"
@@ -936,11 +942,38 @@ remove_command_link() {
 install_self() {
   # Persist this script outside the app bundle so the Mapsim_BOT symlink
   # survives app updates/reinstalls.
-  mkdir -p "$(dirname "$MENU_DEST")"
-  cp "$0" "$MENU_DEST"
-  chmod +x "$MENU_DEST"
-  if [ "$LEGACY_MENU_DEST" != "$MENU_DEST" ]; then
-    rm -f "$LEGACY_MENU_DEST" 2>/dev/null || true
+  #
+  # The running script is normally the installed copy itself (MENU_DEST, or the
+  # Mapsim_BOT symlink to it), so the copy is skipped when both already hold the
+  # same bytes: cp answers "are the same file" on GNU, "identical (not copied)"
+  # on macOS, and a few implementations truncate the file they are still
+  # reading. None of that may look like a failed dashboard update.
+  src=$0
+  case "$src" in
+    */*) : ;;
+    *) src=$(command -v "$src" 2>/dev/null || true) ;;
+  esac
+  mkdir -p "$(dirname "$MENU_DEST")" 2>/dev/null || true
+  if [ -n "$src" ] && [ -f "$src" ]; then
+    if [ -f "$MENU_DEST" ] && cmp -s "$src" "$MENU_DEST" 2>/dev/null; then
+      : # already the installed control center - nothing to copy
+    else
+      cp -f "$src" "$MENU_DEST" 2>/dev/null || true
+      # A truncated or failed copy leaves a broken command behind: check, don't assume.
+      if ! cmp -s "$src" "$MENU_DEST" 2>/dev/null; then
+        echo "note: the control center could not refresh itself at $MENU_DEST - run install.sh once." >&2
+      fi
+    fi
+  elif [ ! -f "$MENU_DEST" ]; then
+    echo "note: no control center copy is available at $MENU_DEST - run install.sh again." >&2
+  fi
+  chmod +x "$MENU_DEST" 2>/dev/null || true
+  if [ "$LEGACY_MENU_DEST" != "$MENU_DEST" ] && [ -f "$LEGACY_MENU_DEST" ]; then
+    if [ -n "$src" ] && [ -f "$src" ] && [ "$src" -ef "$LEGACY_MENU_DEST" ] 2>/dev/null; then
+      : # running from the old location - leave that file alone
+    else
+      rm -f "$LEGACY_MENU_DEST" 2>/dev/null || true
+    fi
   fi
 }
 
@@ -1023,6 +1056,52 @@ version_gt() {
   }'
 }
 
+# ---------------------------------------------------------------- control center self-refresh
+
+# Version of a menu file, or empty when it predates the MENU_VERSION marker.
+menu_version_of() {
+  sed -n 's/^MENU_VERSION=//p' "$1" 2>/dev/null | head -n 1 | tr -d ' \r' || true
+}
+
+# install.sh runs once and a dashboard update never touches this file, so without
+# this the control center would stay at whatever version was downloaded the first
+# time and every later fix to the menu itself would never reach an existing
+# install. The download only replaces the installed copy when it is a complete,
+# syntactically valid, strictly newer menu - and it is moved into place, never
+# copied over the file this shell is still reading.
+refresh_menu_self() {
+  [ -n "${MENU_URL:-}" ] || return 0
+  dest="$MENU_DEST"
+  tmp="$dest.new.$$"
+  if ! curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" -o "$tmp" "$MENU_URL" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 0
+  fi
+  remote=$(menu_version_of "$tmp")
+  # An error page or a half-downloaded file is not a menu.
+  if [ -z "${remote:-}" ] || ! grep -q '^install_self()' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 0
+  fi
+  local_v=$(menu_version_of "$dest")
+  [ -z "${local_v:-}" ] && local_v=0.0.0
+  if ! version_gt "$remote" "$local_v"; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 0
+  fi
+  if ! sh -n "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 0
+  fi
+  mkdir -p "$(dirname "$dest")" 2>/dev/null || true
+  if mv -f "$tmp" "$dest" 2>/dev/null; then
+    chmod +x "$dest" 2>/dev/null || true
+    echo "control center updated to $remote - it is used from the next start."
+  else
+    rm -f "$tmp" 2>/dev/null || true
+  fi
+}
+
 update_policy() {
   p=""
   if [ -f "$UPDATE_POLICY_FILE" ]; then
@@ -1080,6 +1159,7 @@ update_check_now() {
 
 # Runs once per menu session; honours the stored policy.
 update_startup() {
+  refresh_menu_self
   policy=$(update_policy)
   [ "$policy" = "off" ] && return 0
   # Forced: acting on a cached tag is how a release published minutes ago stays
@@ -1132,6 +1212,7 @@ auto_update_run() {
   fi
   # The 6h menu cache would hide a release published since the last check.
   rm -f "$UPDATE_CACHE_FILE"
+  refresh_menu_self
   update_refresh
   if [ -z "${UPDATE_LATEST:-}" ]; then
     update_log "check failed (GitHub unreachable or rate limited)."
@@ -1396,6 +1477,10 @@ download_and_install() {
   install_self
   had_service=0
   if service_installed && service_active; then had_service=1; fi
+  # A dashboard started by hand (menu 2) has nothing that brings it back after
+  # the stop below, so remember it or the update leaves the user without one.
+  was_running=0
+  if [ -n "$(dashboard_pid)" ]; then was_running=1; fi
   stop_dashboard --force >/dev/null 2>&1 || true
   if [ "$OS" = "Darwin" ]; then
     mkdir -p "$HOME/Applications"
@@ -1429,6 +1514,11 @@ EOF
   if [ "$had_service" -eq 1 ]; then
     service_start
     echo "auto-start service restarted with the new version."
+  elif [ "$was_running" -eq 1 ]; then
+    bind=$(current_bind)
+    [ -z "$bind" ] && bind="127.0.0.1"
+    echo "starting the updated dashboard again ..."
+    start_dashboard "$bind" "$(current_port)" || true
   fi
 }
 
@@ -1927,22 +2017,37 @@ ea_find_mql5() {
   done | awk '!seen[$0]++'
 }
 
-# Pick the right .ex5 for this OS from the extracted package root.
+# Pick the right .ex5 for this OS from the extracted package root. A package
+# carries several builds (Win-32bit, Win 64bit, macOS) inside sub folders, so the
+# first one found is not the newest: pick the last by name and say what was found.
 ea_pick_expert() {
   src="$1"
   case "$OS" in
     Darwin) pref="mcos" ;;
     *) pref="win" ;;
   esac
-  all=$(find "$src" -name '*.ex5' 2>/dev/null | sort)
+  all=$(find "$src" -name '*.ex5' 2>/dev/null | LC_ALL=C sort)
   if [ -z "$all" ]; then
     echo ""
     return
   fi
-  picked=$(printf '%s\n' "$all" | grep -i "$pref" | head -n 1 || true)
-  if [ -z "$picked" ]; then
-    picked=$(printf '%s\n' "$all" | head -n 1)
-    echo "note: no '$pref' build found - using $(basename "$picked")" >&2
+  builds=$(printf '%s\n' "$all" | grep -i "$pref" || true)
+  if [ -z "$builds" ]; then
+    builds="$all"
+    echo "note: no '$pref' build found - using the newest build available" >&2
+  fi
+  if [ "$(printf '%s\n' "$builds" | wc -l | tr -d ' ')" -gt 1 ]; then
+    echo "'$pref' builds in this package:" >&2
+    printf '%s\n' "$builds" | while IFS= read -r b; do
+      echo "  $(basename "$b")  ($(wc -c < "$b" | tr -d ' ') bytes)" >&2
+    done
+  fi
+  picked=$(printf '%s\n' "$builds" | tail -n 1)
+  if [ "$OS" != "Darwin" ]; then
+    case "$picked" in
+      *64*) : ;;
+      *) echo "warning: $(basename "$picked") is a 32-bit Windows build and MetaTrader 5 runs 64-bit Experts." >&2 ;;
+    esac
   fi
   echo "$picked"
 }
@@ -2032,6 +2137,41 @@ ea_install() {
     return 1
   fi
   include_zip=$(find "$pkg" -path '*/Include/*' -name '*.zip' | head -n 1 || true)
+  # Never overwrite an Expert silently: the user may have it on open charts.
+  replacing=""
+  n=1
+  old_ifs=$IFS
+  IFS='
+'
+  for d in $mql5_list; do
+    if [ "$sel" != "a" ] && [ "$sel" != "A" ] && [ "$sel" != "$n" ]; then
+      n=$((n + 1))
+      continue
+    fi
+    n=$((n + 1))
+    f="$d/Experts/$(basename "$ex5")"
+    if [ -f "$f" ]; then
+      [ -z "$replacing" ] && echo "this replaces an Expert that is already installed ($(basename "$ex5")):"
+      echo "  $f"
+      replacing=1
+    fi
+  done
+  IFS=$old_ifs
+  if [ -n "$replacing" ]; then
+    a=$(ask_default "n" "replace it? (y/n, 0 = back)")
+    if wants_back "$a"; then
+      rm -rf "$tmp"
+      trap - INT TERM
+      echo "back to the main menu."
+      return 1
+    fi
+    if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
+      rm -rf "$tmp"
+      trap - INT TERM
+      echo "nothing was changed."
+      return 0
+    fi
+  fi
 
   installed_to=""
   n=1

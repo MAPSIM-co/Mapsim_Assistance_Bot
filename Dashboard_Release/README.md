@@ -112,6 +112,9 @@ you can copy it), whether the live snapshot file is being read
                                      port; if the auto-start service is running it
                                      is stopped too (otherwise it would restart it)
   4) Install / update dashboard    - downloads the newest release, checksum-checked
+                                     and then restarts what was running (the
+                                     auto-start service or a dashboard you started
+                                     by hand) with the new build
   5) Service management            - submenu: status, install + enable, start,
                                      stop, restart, enable at boot/login, disable
                                      at boot/login (systemd / LaunchAgent /
@@ -220,9 +223,9 @@ Menu **14 (macOS/Linux) / 13 (Windows)** chooses how new releases are handled:
 
   1) notify - check and tell me (default)
   2) auto   - install automatically in the background (macOS/Linux: an hourly
-              launchd/systemd check) and at menu start, then restart the
-              service if it was running
-  3) off    - never check for a new dashboard (the Windows control center still
+              launchd/systemd check) and at menu start, then restart whatever was
+              running, the service or a dashboard started by hand
+  3) off    - never check for a new dashboard (the control center still
               refreshes its own file, see below)
   4) check now
 
@@ -237,9 +240,9 @@ the check at menu start.
 Re-running the install command (the `curl ... install.sh | sh` line) also
 refreshes `~/.local/share/MapsimBOT/mapsim-menu.sh` from GitHub and
 re-applies the saved policy, so an existing machine picks up a newer menu and,
-with **auto**, the hourly check without touching any files by hand. A server
-that was installed before this feature therefore needs that one install command
-once; after it, releases are installed on their own.
+with **auto**, the hourly check without touching any files by hand. The menu now
+refreshes itself as well (see below), so an existing machine only needs that one
+install command if it is never opened again.
 
 The check is a single unauthenticated GitHub API call from the menu/dashboard
 process, cached for fifteen minutes in
@@ -268,18 +271,22 @@ service or the dashboard the user had started by hand, then reports the version
 the new build reports itself. The equivalent macOS/Linux rule refuses a
 downgrade instead of asking, because that path can run unattended.
 
-The Expert Advisor item follows the same rule: it installs the newest Windows
-build in the package instead of the first `.ex5` it finds, warns when the
-package carries a 32-bit build, and asks before replacing an Expert that is
-already in `MQL5\Experts`.
+The Expert Advisor item follows the same rule on both platforms: it installs
+the newest OS-matched build in the package instead of the first `.ex5` it finds,
+lists the other builds it found, warns when the chosen Windows build is 32-bit,
+and asks before replacing an Expert that is already in `MQL5\Experts`.
 
-**The Windows control center updates itself.** `mapsim-menu.ps1` carries its own
-version (`$MapsimMenuVersion`). At start it compares that number with the copy
+**The control center updates itself on every platform.** Both files carry their
+own version (`$MapsimMenuVersion` in `mapsim-menu.ps1`, `MENU_VERSION` in
+`mapsim-menu.sh`). At start the menu compares that number with the copy
 published on `main` and replaces its installed file when the published one is
 newer; the new file is used from the next start, and only after it proves to be
-a menu (`function Show-Menu` is present). The dashboard archive does not contain
-the menu, so without this a fix could never reach a machine that only opens the
-shortcut.
+a menu (the Windows copy must contain `function Show-Menu`, the macOS/Linux copy
+must contain `install_self()` and pass `sh -n`). The dashboard archive does not
+contain the menu, so without this a fix could never reach a machine that only
+opens the shortcut or the `Mapsim_BOT` command. The replacement is a rename, not
+a copy over the running file, so the menu that is executing finishes its work
+normally and a half-written file is never left behind.
 
 ### Snapshot / data source
 
