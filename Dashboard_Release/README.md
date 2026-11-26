@@ -222,7 +222,8 @@ Menu **14 (macOS/Linux) / 13 (Windows)** chooses how new releases are handled:
   2) auto   - install automatically in the background (macOS/Linux: an hourly
               launchd/systemd check) and at menu start, then restart the
               service if it was running
-  3) off    - never check (no network request at all)
+  3) off    - never check for a new dashboard (the Windows control center still
+              refreshes its own file, see below)
   4) check now
 
 On macOS and Linux, choosing **auto** also installs an hourly background check
@@ -241,11 +242,44 @@ that was installed before this feature therefore needs that one install command
 once; after it, releases are installed on their own.
 
 The check is a single unauthenticated GitHub API call from the menu/dashboard
-process, cached for six hours in `~/.config/mapsim-dashboard/update-cache`
+process, cached for fifteen minutes in
+`~/.config/mapsim-dashboard/update-cache`
 (`%APPDATA%\MapsimDashboard\update-cache.json` on Windows). It sends no account
 data. The version installed by the menu is recorded in `dashboard.version` so
 the comparison survives restarts; builds installed before this feature report
 their version themselves.
+
+The menu re-reads GitHub when it starts, whatever the policy is, so a release
+published a minute ago is offered at the next start instead of hours later. The
+cache only saves a round trip while a newer release is already known: when the
+cached answer is "up to date" the menu asks again before it says so, because
+that answer can only be wrong in that direction. Both caches resolve the newest
+tag by version number, so the order the API happens to list releases in cannot
+decide which build is installed, and a draft (the held-back license-free
+builds) is never offered.
+
+**Menu 4 (Windows: Install / update dashboard)** performs the update the user
+asked for: it asks GitHub for the newest release, downloads the archive with its
+`.sha256`, verifies the hash and only then replaces the app. Two things are
+never done silently - it never installs a version that is not newer than the
+installed one (a failed lookup used to fall back to an older pinned tag and
+quietly downgrade the build), and it restarts what was running, the auto-start
+service or the dashboard the user had started by hand, then reports the version
+the new build reports itself. The equivalent macOS/Linux rule refuses a
+downgrade instead of asking, because that path can run unattended.
+
+The Expert Advisor item follows the same rule: it installs the newest Windows
+build in the package instead of the first `.ex5` it finds, warns when the
+package carries a 32-bit build, and asks before replacing an Expert that is
+already in `MQL5\Experts`.
+
+**The Windows control center updates itself.** `mapsim-menu.ps1` carries its own
+version (`$MapsimMenuVersion`). At start it compares that number with the copy
+published on `main` and replaces its installed file when the published one is
+newer; the new file is used from the next start, and only after it proves to be
+a menu (`function Show-Menu` is present). The dashboard archive does not contain
+the menu, so without this a fix could never reach a machine that only opens the
+shortcut.
 
 ### Snapshot / data source
 

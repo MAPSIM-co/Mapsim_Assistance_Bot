@@ -23,7 +23,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
-$FallbackVersion = 'dashboard-v1.0.6'
+# Bumped whenever this file changes in a way an installed copy must receive: at
+# start the menu compares this number with the copy published on main and
+# replaces its own installed file when that one is newer (Update-MenuSelf).
+$MapsimMenuVersion = '1.1.0'
+$MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
+# Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
+# a first install can never land on a build older than the newest release known
+# when this file was written. It is never installed over a newer build.
+$FallbackVersion = 'dashboard-v1.0.9'
 $AppDir = Join-Path $env:LOCALAPPDATA 'MapsimDashboard'
 $Binary = Join-Path $AppDir 'MapsimDashboard.exe'
 # Kept outside AppDir: an update replaces AppDir wholesale, and a menu that
@@ -505,7 +513,9 @@ function Read-Host {
   if ($secret) { return $answer }
   return (ConvertFrom-MenuAnswer $answer)
 }
-$UpdateCacheTtl = 21600
+# The cached tag only saves a round trip while a newer release is already known;
+# a short life keeps a fresh release visible within minutes instead of hours.
+$UpdateCacheTtl = 900
 $script:UpdateInstalled = ''
 $script:UpdateLatest = ''
 $script:UpdateAvailable = $false
@@ -813,23 +823,29 @@ function Write-Shim {
 
 function Install-Dashboard {
   if (-not [Environment]::Is64BitOperatingSystem) { throw 'Windows x64 is required.' }
+  $installed = Get-InstalledVersion
   $ver = $Version
   if (-not $ver) {
-    try {
-      $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=50" -TimeoutSec 15
-      $tag = ($rel | Where-Object { $_.tag_name -like 'dashboard-v*' } | Select-Object -First 1).tag_name
-      if ($tag) { $ver = $tag }
-    } catch { }
+    # Ask GitHub directly instead of reading the cache: an install the user asked
+    # for must never act on a tag cached hours ago.
+    try { $tags = @(Get-ReleaseTagList); if ($tags.Count -gt 0) { $ver = [string]$tags[0] } } catch { }
   }
   if (-not $ver) { $ver = $FallbackVersion }
+  $plain = $ver -replace '^dashboard-v', ''
+  # An update that replaces a newer build with an older one is the worst silent
+  # outcome of a failed lookup, so it is never done without an explicit yes.
+  if ($installed -and -not (Test-NewerDashboardVersion $plain $installed)) {
+    $a = Read-Default "version $installed is already installed - reinstall $plain anyway? (y/n)" 'n'
+    if ($a -ne 'y') { Write-Host 'nothing was changed.'; return }
+  }
   $asset = 'MapsimDashboard-windows-x64.zip'
   $base = "https://github.com/$Repo/releases/download/$ver"
   Write-Host "installing $ver ($asset) ..."
   $tmp = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
   New-Item -ItemType Directory -Force $tmp | Out-Null
   try {
-    Invoke-WebRequest -Uri "$base/$asset" -OutFile (Join-Path $tmp $asset) -TimeoutSec 600
-    Invoke-WebRequest -Uri "$base/$asset.sha256" -OutFile (Join-Path $tmp "$asset.sha256") -TimeoutSec 60
+    Invoke-WebRequest -Uri "$base/$asset" -OutFile (Join-Path $tmp $asset) -TimeoutSec 600 -UseBasicParsing
+    Invoke-WebRequest -Uri "$base/$asset.sha256" -OutFile (Join-Path $tmp "$asset.sha256") -TimeoutSec 60 -UseBasicParsing
     $expected = ((Get-Content (Join-Path $tmp "$asset.sha256")) -split '\s+')[0].ToLower()
     $actual = (Get-FileHash (Join-Path $tmp $asset) -Algorithm SHA256).Hash.ToLower()
     if ($expected -ne $actual) { throw "checksum mismatch for $asset" }
@@ -837,6 +853,7 @@ function Install-Dashboard {
     # script lived inside it and would be gone by the time Install-Self reads it.
     Install-Self
     $hadService = Test-ServiceRunning
+    $wasRunning = [bool](Get-DashboardPid)
     Stop-Dashboard | Out-Null
     if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
     New-Item -ItemType Directory -Force $AppDir | Out-Null
@@ -847,11 +864,26 @@ function Install-Dashboard {
   }
   Write-Shim
   New-Item -ItemType Directory -Force $ConfigDir | Out-Null
-  Set-Content -Path $VersionFile -Value ($ver -replace '^dashboard-v', '') -Encoding ASCII
-  Write-Host "installed: $AppDir ($($ver -replace '^dashboard-v', ''))"
+  Set-Content -Path $VersionFile -Value $plain -Encoding ASCII
+  # The tag that was just installed is the newest one, so the cached answer is
+  # stale by definition; drop it and let the next check read GitHub.
+  Remove-Item $UpdateCacheFile -Force -ErrorAction SilentlyContinue
+  $now = Get-InstalledVersion
+  if (-not $now) {
+    Write-Host "warning: $AppDir was written but reports no version - check the dashboard log." -ForegroundColor Yellow
+  } elseif ($now -ne $plain) {
+    Write-Host "warning: the installed build reports $now, expected $plain." -ForegroundColor Yellow
+  } else {
+    Write-Host "installed: $AppDir ($plain)"
+  }
+  # The update is only real once the new build runs: the task if it was the task,
+  # otherwise the instance the user had started by hand.
   if ($hadService) {
     Start-ServiceTask
     Write-Host 'auto-start task started again with the new version.'
+  } elseif ($wasRunning) {
+    Write-Host 'starting the updated dashboard again ...'
+    Start-Dashboard (Get-CurrentBind) (Get-CurrentPort)
   }
 }
 
@@ -1097,9 +1129,33 @@ function Get-InstalledVersion {
   return ''
 }
 
-# Newest licensed release tag, cached for 6 hours so the menu starts fast.
-function Get-LatestDashboardTag {
-  if (Test-Path $UpdateCacheFile) {
+# "dashboard-v1.0.9" -> [version]1.0.9, or $null for a tag that is not a version.
+function ConvertTo-ReleaseVersion([string]$Tag) {
+  if (-not $Tag) { return $null }
+  try { return [version]($Tag -replace '^dashboard-v', '') } catch { return $null }
+}
+
+# Every release lookup goes through here. A draft or a prerelease is never
+# offered (the held-back license-free builds are drafts), and the newest tag is
+# chosen by version number instead of by the order the API happened to return
+# it in.
+function Get-ReleaseTagList {
+  $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=50" -TimeoutSec 12
+  $rows = @()
+  foreach ($r in @($rel)) {
+    if ($r.draft -or $r.prerelease) { continue }
+    if ($r.tag_name -notmatch '^dashboard-v\d') { continue }
+    $v = ConvertTo-ReleaseVersion $r.tag_name
+    if (-not $v) { continue }
+    $rows += [pscustomobject]@{ tag = [string]$r.tag_name; ver = $v }
+  }
+  return @($rows | Sort-Object -Property ver -Descending | ForEach-Object { $_.tag })
+}
+
+# Newest licensed release tag, cached so the menu starts fast. -Force skips the
+# cache: anything the user asked for explicitly must see today's release.
+function Get-LatestDashboardTag([switch]$Force) {
+  if (-not $Force -and (Test-Path $UpdateCacheFile)) {
     try {
       $cache = Get-Content $UpdateCacheFile -Raw | ConvertFrom-Json
       $age = [DateTimeOffset]::Now.ToUnixTimeSeconds() - [int64]$cache.checked
@@ -1107,14 +1163,21 @@ function Get-LatestDashboardTag {
     } catch { }
   }
   try {
-    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=50" -TimeoutSec 8
-    $tag = ($rel | Where-Object { -not $_.draft -and -not $_.prerelease -and $_.tag_name -match '^dashboard-v\d' } | Select-Object -First 1).tag_name
-    if ($tag) {
+    $tags = @(Get-ReleaseTagList)
+    if ($tags.Count -gt 0) {
+      $tag = [string]$tags[0]
       New-Item -ItemType Directory -Force $ConfigDir | Out-Null
       @{ checked = [DateTimeOffset]::Now.ToUnixTimeSeconds(); tag = $tag } | ConvertTo-Json | Set-Content -Path $UpdateCacheFile -Encoding ASCII
-      return [string]$tag
+      return $tag
     }
   } catch { }
+  # The network failed: a stale tag is still a better answer than none.
+  if (Test-Path $UpdateCacheFile) {
+    try {
+      $cache = Get-Content $UpdateCacheFile -Raw | ConvertFrom-Json
+      if ($cache.tag) { return [string]$cache.tag }
+    } catch { }
+  }
   return ''
 }
 
@@ -1140,21 +1203,54 @@ function Set-UpdatePolicy([string]$Policy) {
   Set-Content -Path $UpdatePolicyFile -Value $Policy -Encoding ASCII
 }
 
-function Update-Refresh {
+function Update-Refresh([switch]$Force) {
   $script:UpdateInstalled = Get-InstalledVersion
-  $latestTag = Get-LatestDashboardTag
+  $latestTag = Get-LatestDashboardTag -Force:$Force
   $script:UpdateLatest = ''
   if ($latestTag) { $script:UpdateLatest = $latestTag -replace '^dashboard-v', '' }
   $script:UpdateAvailable = $false
   if ($script:UpdateLatest -and $script:UpdateInstalled -and (Test-NewerDashboardVersion $script:UpdateLatest $script:UpdateInstalled)) {
     $script:UpdateAvailable = $true
+    return
+  }
+  # "Nothing new" is the one answer the cache cannot be trusted for: it may have
+  # been written before the release that is now on GitHub. Ask once more before
+  # telling the user the build is up to date.
+  if (-not $Force -and $script:UpdateInstalled) {
+    $freshTag = Get-LatestDashboardTag -Force
+    if ($freshTag) {
+      $script:UpdateLatest = $freshTag -replace '^dashboard-v', ''
+      $script:UpdateAvailable = Test-NewerDashboardVersion $script:UpdateLatest $script:UpdateInstalled
+    }
   }
 }
 
+# The control center replaces its own installed copy when main publishes a newer
+# one. Without this a fix can never reach a user who only opens the shortcut:
+# the dashboard archive does not carry this file.
+function Update-MenuSelf {
+  try {
+    $text = (Invoke-WebRequest -Uri $MenuUrl -TimeoutSec 15 -UseBasicParsing).Content
+    if (-not ($text -is [string]) -or -not $text) { return }
+    if ($text -notmatch '(?m)^\$MapsimMenuVersion = ''([0-9][0-9.]*)''') { return }
+    $remote = $Matches[1]
+    if (-not (Test-NewerDashboardVersion $remote $MapsimMenuVersion)) { return }
+    if ($text -notmatch 'function Show-Menu') { return }
+    New-Item -ItemType Directory -Force $MenuDir | Out-Null
+    $tmp = "$MenuPath.new"
+    Set-Content -Path $tmp -Value $text -Encoding UTF8
+    Move-Item -Force $tmp $MenuPath
+    Write-Host "control center updated to $remote - it is used from the next start." -ForegroundColor Yellow
+  } catch { }
+}
+
 function Invoke-StartupUpdateCheck {
+  Update-MenuSelf
   $policy = Get-UpdatePolicy
   if ($policy -eq 'off') { return }
-  Update-Refresh
+  # Forced: acting on a cached tag is how a release published minutes ago stays
+  # invisible for hours, which is exactly the "auto update does nothing" bug.
+  Update-Refresh -Force
   if (-not $script:UpdateAvailable) { return }
   if ($policy -eq 'auto') {
     Write-Host ''
@@ -1163,7 +1259,7 @@ function Invoke-StartupUpdateCheck {
     $script:Version = "dashboard-v$($script:UpdateLatest)"
     try { Install-Dashboard } catch { Write-Host "automatic update failed: $($_.Exception.Message)" -ForegroundColor Red }
     $script:Version = $previousVersion
-    Update-Refresh
+    Update-Refresh -Force
     $null = Read-Host 'Press Enter to open the menu'
     return
   }
@@ -1181,7 +1277,7 @@ function Show-UpdatePolicyMenu {
     Write-Host ''
     Write-Host '  1) notify - check when the menu starts and tell me (default)'
     Write-Host '  2) auto   - install a new version automatically when the menu starts'
-    Write-Host '  3) off    - never check for updates'
+    Write-Host '  3) off    - never check for a new dashboard (the menu still fixes itself)'
     Write-Host '  4) check now'
     $a = Read-Host 'choose 1-4 (0 = back)'
     if ($a -eq '0') { return }
@@ -1190,7 +1286,8 @@ function Show-UpdatePolicyMenu {
       '2' { Set-UpdatePolicy 'auto'; Write-Host 'policy: auto - a new release installs at menu start.' }
       '3' { Set-UpdatePolicy 'off'; Write-Host 'policy: off.' }
       '4' {
-        Update-Refresh
+        Write-Host 'checking GitHub ...'
+        Update-Refresh -Force
         if (-not $script:UpdateLatest) { Write-Host 'could not reach GitHub (offline or rate limited).' -ForegroundColor Yellow }
         elseif ($script:UpdateAvailable) { Write-Host "update available: $($script:UpdateInstalled) -> $($script:UpdateLatest) (menu 4 installs it)" -ForegroundColor Yellow }
         elseif ($script:UpdateInstalled) { Write-Host "dashboard is up to date ($($script:UpdateInstalled))." -ForegroundColor Green }
@@ -1501,7 +1598,10 @@ function Show-Menu {
         Start-Dashboard $bind $port
       }
       '3' { Stop-Dashboard }
-      '4' { Install-Dashboard }
+      '4' {
+        try { Install-Dashboard; Update-Refresh -Force }
+        catch { Write-Host "update failed: $($_.Exception.Message)" -ForegroundColor Red }
+      }
       '5' { Show-ServiceMenu }
       '6' {
         if (-not (Test-ServiceInstalled)) { Write-Host 'no service is installed.'; continue }
@@ -1644,12 +1744,33 @@ function Install-Ea([string]$Version) {
     $root = Get-ChildItem (Join-Path $tmp 'src') -Directory | Select-Object -First 1
     $pkg = Join-Path $root.FullName 'Expert\Meta_trader_5'
     if (-not (Test-Path $pkg)) { throw "the $Version package has no Expert folder." }
-    $ex5 = Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Where-Object { $_.Name -match 'win' } | Select-Object -First 1
+    # The published package carries the Windows builds under the sub folders; the
+    # newest one is the last by name, not the first one found.
+    $winBuilds = @(Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Where-Object { $_.Name -match 'win' } | Sort-Object Name)
+    $ex5 = $winBuilds | Select-Object -Last 1
     if (-not $ex5) {
-      $ex5 = Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Select-Object -First 1
+      $ex5 = Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Sort-Object Name | Select-Object -Last 1
       if ($ex5) { Write-Host "note: no Windows build found - using $($ex5.Name)" }
     }
     if (-not $ex5) { throw "no .ex5 Expert file in the $Version package." }
+    if ($winBuilds.Count -gt 1) {
+      Write-Host "Windows builds in $Version :"
+      foreach ($b in $winBuilds) { Write-Host "  $($b.Name)  ($([math]::Round($b.Length / 1KB)) KB)" }
+    }
+    if ($ex5.Name -notmatch '64') {
+      Write-Host "warning: $($ex5.Name) is a 32-bit Windows build and MetaTrader 5 runs 64-bit Experts." -ForegroundColor Yellow
+    }
+    $existing = @()
+    foreach ($mql5 in @($mql5List)) {
+      $f = Join-Path $mql5 "Experts\$($ex5.Name)"
+      if (Test-Path $f) { $existing += $f }
+    }
+    if ($existing.Count -gt 0) {
+      Write-Host "this replaces an Expert that is already installed ($($ex5.Name)):"
+      foreach ($f in $existing) { Write-Host "  $f" }
+      $a = Read-Default 'replace it? (y/n)' 'n'
+      if ($a -ne 'y') { Write-Host 'nothing was changed.'; return }
+    }
     $includeZip = Get-ChildItem (Join-Path $pkg 'Include') -Filter '*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
     $dll = Join-Path $pkg 'Libraries\sqlite3.dll'
     $sounds = Join-Path $pkg 'Sounds\Mapsim_Assistance_Bot\Sounds'
@@ -2017,6 +2138,11 @@ function Initialize-MapsimHost {
 }
 
 # ------------------------------------------------------------------ entrypoint
+
+# The one-shot switches print into this console, which cannot draw Persian, so
+# they answer in English even when the menu itself is set to Persian. Only the
+# file on disk decides the language; this never writes it.
+if ($Status -or $Stop -or $RemoveService -or $Uninstall -or $Bootstrap) { $script:MapsimLang = 'en' }
 
 if ($Uninstall) { Uninstall-Everything; return }
 if ($RemoveService) { Remove-Service; Write-Host 'service removed.'; return }

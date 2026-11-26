@@ -13,7 +13,7 @@
 set -u
 
 REPO="MAPSIM-co/Mapsim_Assistance_Bot"
-FALLBACK_VERSION="dashboard-v1.0.6"
+FALLBACK_VERSION="dashboard-v1.0.9"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
 CONFIG_DIR="$HOME/.config/mapsim-dashboard"
@@ -30,7 +30,7 @@ UPDATE_POLICY_FILE="$CONFIG_DIR/update-policy"
 UPDATE_CACHE_FILE="$CONFIG_DIR/update-cache"
 UPDATE_LOG_FILE="$CONFIG_DIR/update.log"
 UPDATE_TIMER_NAME="mapsim-dashboard-update"
-UPDATE_CACHE_TTL=21600
+UPDATE_CACHE_TTL=900
 UPDATE_HTTP_TIMEOUT=6
 UPDATE_INSTALLED=""
 UPDATE_LATEST=""
@@ -973,10 +973,13 @@ installed_version() {
   return 1
 }
 
-# Newest licensed release tag, cached for 6 hours so the menu starts fast.
+# Newest licensed release tag, cached so the menu starts fast. --force skips the
+# cache: a check the user asked for must see today's release.
 latest_version() {
+  force=0
+  [ "${1:-}" = "--force" ] && force=1
   now=$(date +%s 2>/dev/null || echo 0)
-  if [ -f "$UPDATE_CACHE_FILE" ]; then
+  if [ "$force" -eq 0 ] && [ -f "$UPDATE_CACHE_FILE" ]; then
     ts=$(cut -d' ' -f1 "$UPDATE_CACHE_FILE" 2>/dev/null || true)
     tag=$(cut -d' ' -f2 "$UPDATE_CACHE_FILE" 2>/dev/null || true)
     case "${ts:-}" in ''|*[!0-9]*) ts=0 ;; esac
@@ -991,6 +994,14 @@ latest_version() {
   tag=$(printf '%s\n' "$raw" | grep -o '"tag_name": *"dashboard-v[0-9][^"]*"' | head -n 1 \
     | sed 's/.*"\(dashboard-v[^"]*\)"/\1/' || true)
   if [ -z "${tag:-}" ]; then
+    # The network failed: a stale tag is still a better answer than none.
+    if [ -f "$UPDATE_CACHE_FILE" ]; then
+      stale=$(cut -d' ' -f2 "$UPDATE_CACHE_FILE" 2>/dev/null || true)
+      if [ -n "${stale:-}" ]; then
+        normalize_version "$stale"
+        return 0
+      fi
+    fi
     return 1
   fi
   mkdir -p "$CONFIG_DIR" 2>/dev/null || true
@@ -1029,17 +1040,33 @@ set_update_policy() {
 }
 
 update_refresh() {
+  force=0
+  [ "${1:-}" = "--force" ] && force=1
   UPDATE_INSTALLED=$(installed_version || true)
-  UPDATE_LATEST=$(latest_version || true)
+  if [ "$force" -eq 1 ]; then
+    UPDATE_LATEST=$(latest_version --force || true)
+  else
+    UPDATE_LATEST=$(latest_version || true)
+  fi
   UPDATE_AVAILABLE=0
   if [ -n "${UPDATE_LATEST:-}" ] && [ -n "${UPDATE_INSTALLED:-}" ] \
      && version_gt "$UPDATE_LATEST" "$UPDATE_INSTALLED"; then
     UPDATE_AVAILABLE=1
+    return 0
+  fi
+  # "Nothing new" is the one answer the cache cannot be trusted for: it may have
+  # been written before the release that is now on GitHub.
+  if [ "$force" -eq 0 ] && [ -n "${UPDATE_INSTALLED:-}" ]; then
+    fresh=$(latest_version --force || true)
+    if [ -n "${fresh:-}" ]; then
+      UPDATE_LATEST="$fresh"
+      if version_gt "$UPDATE_LATEST" "$UPDATE_INSTALLED"; then UPDATE_AVAILABLE=1; fi
+    fi
   fi
 }
 
 update_check_now() {
-  update_refresh
+  update_refresh --force
   if [ -z "${UPDATE_LATEST:-}" ]; then
     msg_warn "could not reach GitHub (offline or rate limited)."
   elif [ "$UPDATE_AVAILABLE" -eq 1 ]; then
@@ -1055,7 +1082,9 @@ update_check_now() {
 update_startup() {
   policy=$(update_policy)
   [ "$policy" = "off" ] && return 0
-  update_refresh
+  # Forced: acting on a cached tag is how a release published minutes ago stays
+  # invisible for hours.
+  update_refresh --force
   if [ -z "${UPDATE_LATEST:-}" ] || [ "$UPDATE_AVAILABLE" -eq 0 ]; then
     return 0
   fi
@@ -1065,7 +1094,7 @@ update_startup() {
     WANT_VERSION="dashboard-v$UPDATE_LATEST"
     download_and_install
     unset WANT_VERSION
-    update_refresh
+    update_refresh --force
     if [ -t 0 ]; then
       printf '%s' "press Enter to open the menu..."
       IFS= read -r _ || true
@@ -1334,6 +1363,23 @@ download_and_install() {
     return 1
   fi
   version=$(detect_version)
+  # Never replace a newer build with an older one: a failed lookup must not
+  # silently downgrade the dashboard.
+  plain=$(normalize_version "$version")
+  current=$(installed_version || true)
+  if [ -n "${current:-}" ] && ! version_gt "$plain" "$current"; then
+    if [ ! -t 0 ]; then
+      echo "refusing to install $plain over the newer $current." >&2
+      return 1
+    fi
+    msg_warn "version $current is already installed - reinstall $plain anyway? (y/n)"
+    answer=""
+    IFS= read -r answer || true
+    case "$answer" in
+      y|Y|yes|Yes|YES|بله|بلی|بلي|آره|اره) ;;
+      *) echo "nothing was changed."; return 0 ;;
+    esac
+  fi
   base="https://github.com/$REPO/releases/download/$version"
   echo "installing $version ($asset) ..."
   tmp=$(mktemp -d)
