@@ -35,63 +35,27 @@ jobs:
         # manual run still builds both.
         variant: ${{ (github.event_name == 'workflow_dispatch' && fromJSON('["licensed","free"]')) || (startsWith(github.ref, 'refs/tags/dashboard-free-v') && fromJSON('["free"]')) || fromJSON('["licensed"]') }}
         os: [macos-latest, macos-15-intel, windows-latest, ubuntu-22.04]
+        # The include objects carry platform data only. They are keyed on `os` so
+        # they merge into both variant rows and never add a row of their own: an
+        # include that names a variant the tag excluded is appended as a new
+        # combination, which is what keeps the free jobs alive on a licensed tag.
         include:
           - os: macos-latest
             label: macos-arm64
-            zip: MapsimDashboard-macos-arm64.zip
-            variant: licensed
-            source_ref: main
-            licensed: 1
-            artifact_name: MapsimDashboard
+            zip_licensed: MapsimDashboard-macos-arm64.zip
+            zip_free: MapsimDashboardFree-macos-arm64.zip
           - os: macos-15-intel
             label: macos-x64
-            zip: MapsimDashboard-macos-x64.zip
-            variant: licensed
-            source_ref: main
-            licensed: 1
-            artifact_name: MapsimDashboard
+            zip_licensed: MapsimDashboard-macos-x64.zip
+            zip_free: MapsimDashboardFree-macos-x64.zip
           - os: windows-latest
             label: windows-x64
-            zip: MapsimDashboard-windows-x64.zip
-            variant: licensed
-            source_ref: main
-            licensed: 1
-            artifact_name: MapsimDashboard
+            zip_licensed: MapsimDashboard-windows-x64.zip
+            zip_free: MapsimDashboardFree-windows-x64.zip
           - os: ubuntu-22.04
             label: linux-x64
-            zip: MapsimDashboard-linux-x64.tar.gz
-            variant: licensed
-            source_ref: main
-            licensed: 1
-            artifact_name: MapsimDashboard
-          - os: macos-latest
-            label: macos-arm64
-            zip: MapsimDashboardFree-macos-arm64.zip
-            variant: free
-            source_ref: free
-            licensed: 0
-            artifact_name: MapsimDashboardFree
-          - os: macos-15-intel
-            label: macos-x64
-            zip: MapsimDashboardFree-macos-x64.zip
-            variant: free
-            source_ref: free
-            licensed: 0
-            artifact_name: MapsimDashboardFree
-          - os: windows-latest
-            label: windows-x64
-            zip: MapsimDashboardFree-windows-x64.zip
-            variant: free
-            source_ref: free
-            licensed: 0
-            artifact_name: MapsimDashboardFree
-          - os: ubuntu-22.04
-            label: linux-x64
-            zip: MapsimDashboardFree-linux-x64.tar.gz
-            variant: free
-            source_ref: free
-            licensed: 0
-            artifact_name: MapsimDashboardFree
+            zip_licensed: MapsimDashboard-linux-x64.tar.gz
+            zip_free: MapsimDashboardFree-linux-x64.tar.gz
 
     steps:
       - name: Checkout repository
@@ -103,7 +67,7 @@ jobs:
         with:
           repository: ${{ vars.SOURCE_REPO }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
-          ref: ${{ matrix.source_ref }}
+          ref: ${{ matrix.variant == 'licensed' && 'main' || 'free' }}
           path: source
           fetch-depth: 1
           persist-credentials: false
@@ -167,7 +131,7 @@ jobs:
           python -m pip install -r requirements-build.txt
 
       - name: Create a short-lived smoke-test license
-        if: matrix.licensed == 1
+        if: matrix.variant == 'licensed'
         shell: bash
         run: |
           set -euo pipefail
@@ -246,8 +210,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          args=(--source "$SOURCE_DIR" --out dist --name "${{ matrix.artifact_name }}")
-          if [ "${{ matrix.licensed }}" != "1" ]; then args+=(--license-free); fi
+          args=(--source "$SOURCE_DIR" --out dist --name "${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}")
+          if [ "${{ matrix.variant == 'licensed' && '1' || '0' }}" != "1" ]; then args+=(--license-free); fi
           python build.py "${args[@]}"
 
       - name: Sign Windows binary
@@ -260,7 +224,7 @@ jobs:
             Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signtool) { throw "signtool.exe not found" }
           & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-            /f "$env:PFX_PATH" /p "$env:PFX_PASSWORD" "dist\${{ matrix.artifact_name }}.exe"
+            /f "$env:PFX_PATH" /p "$env:PFX_PASSWORD" "dist\${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}.exe"
 
       - name: Notarize macOS app
         if: runner.os == 'macOS' && steps.signing.outputs.macos == '1'
@@ -271,23 +235,23 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
-          ditto -c -k --keepParent "dist/${{ matrix.artifact_name }}.app" "$RUNNER_TEMP/notarize.zip"
+          ditto -c -k --keepParent "dist/${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}.app" "$RUNNER_TEMP/notarize.zip"
           xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-          xcrun stapler staple "dist/${{ matrix.artifact_name }}.app"
-          xcrun stapler validate "dist/${{ matrix.artifact_name }}.app"
+          xcrun stapler staple "dist/${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}.app"
+          xcrun stapler validate "dist/${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}.app"
 
       - name: Smoke test
         shell: bash
         run: |
           set -euo pipefail
-          name="${{ matrix.artifact_name }}"
+          name="${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}"
           case "${{ runner.os }}" in
             macOS) artifact="dist/$name.app" ;;
             Windows) artifact="dist/$name.exe" ;;
             *) artifact="dist/$name" ;;
           esac
-          if [ "${{ matrix.licensed }}" = "1" ]; then
+          if [ "${{ matrix.variant == 'licensed' && '1' || '0' }}" = "1" ]; then
             python smoke_test.py --artifact "$artifact" --license-file .smoke/license --auth-file .smoke/auth
           else
             python smoke_test.py --artifact "$artifact" --license-free
@@ -304,14 +268,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package
-          ditto -c -k --keepParent "dist/${{ matrix.artifact_name }}.app" "package/${{ matrix.zip }}"
+          ditto -c -k --keepParent "dist/${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}.app" "package/${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}"
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package | Out-Null
-          Compress-Archive -Path "dist\${{ matrix.artifact_name }}.exe" -DestinationPath "package\${{ matrix.zip }}" -Force
+          Compress-Archive -Path "dist\${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}.exe" -DestinationPath "package\${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}" -Force
 
       - name: Package Linux artifact
         if: runner.os == 'Linux'
@@ -319,7 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package
-          tar -C dist -czf "package/${{ matrix.zip }}" "${{ matrix.artifact_name }}"
+          tar -C dist -czf "package/${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}" "${{ matrix.variant == 'licensed' && 'MapsimDashboard' || 'MapsimDashboardFree' }}"
 
       - name: Write checksum
         shell: bash
@@ -327,11 +291,11 @@ jobs:
           set -euo pipefail
           cd package
           if command -v sha256sum > /dev/null 2>&1; then
-            sha256sum "${{ matrix.zip }}" > "${{ matrix.zip }}.sha256"
+            sha256sum "${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}" > "${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}.sha256"
           else
-            shasum -a 256 "${{ matrix.zip }}" > "${{ matrix.zip }}.sha256"
+            shasum -a 256 "${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}" > "${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}.sha256"
           fi
-          cat "${{ matrix.zip }}.sha256"
+          cat "${{ matrix.variant == 'licensed' && matrix.zip_licensed || matrix.zip_free }}.sha256"
 
       - name: Clean up macOS keychain
         if: runner.os == 'macOS' && always()
