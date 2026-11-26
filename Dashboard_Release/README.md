@@ -240,9 +240,10 @@ the check at menu start.
 Re-running the install command (the `curl ... install.sh | sh` line) also
 refreshes `~/.local/share/MapsimBOT/mapsim-menu.sh` from GitHub and
 re-applies the saved policy, so an existing machine picks up a newer menu and,
-with **auto**, the hourly check without touching any files by hand. The menu now
-refreshes itself as well (see below), so an existing machine only needs that one
-install command if it is never opened again.
+with **auto**, the hourly check without touching any files by hand. Because the
+self-refresh described below is code inside the menu, an installation made
+before it was added needs that one install command; from then on the menu keeps
+itself current.
 
 The check is a single unauthenticated GitHub API call from the menu/dashboard
 process, cached for fifteen minutes in
