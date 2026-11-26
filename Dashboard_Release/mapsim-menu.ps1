@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.1.0'
+$MapsimMenuVersion = '1.1.1'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
@@ -889,13 +889,27 @@ function Install-Dashboard {
 
 function Install-Self {
   New-Item -ItemType Directory -Force $MenuDir | Out-Null
-  $sourcePath = [IO.Path]::GetFullPath($PSCommandPath)
-  $menuPath = [IO.Path]::GetFullPath($MenuPath)
-  if (-not [string]::Equals($sourcePath, $menuPath, [StringComparison]::OrdinalIgnoreCase)) {
-    Copy-Item -Force $sourcePath $menuPath
+  # The copy is a convenience, never a precondition: failing it must not abort a
+  # dashboard update that has already been downloaded and verified.
+  if ($PSCommandPath) {
+    $sourcePath = [IO.Path]::GetFullPath($PSCommandPath)
+    $menuPath = [IO.Path]::GetFullPath($MenuPath)
+    if (-not [string]::Equals($sourcePath, $menuPath, [StringComparison]::OrdinalIgnoreCase)) {
+      try {
+        Copy-Item -Force $sourcePath $menuPath -ErrorAction Stop
+      } catch {
+        # The same file under two spellings (short 8.3 path, a mapped drive) makes
+        # Copy-Item fail with "with itself"; the running script is already the
+        # installed control center, so there is nothing to copy.
+        if ($_.Exception.Message -notmatch 'with itself') {
+          Write-Host "note: the control center could not copy itself to $MenuPath - $($_.Exception.Message)" -ForegroundColor Yellow
+          Write-Host '      the dashboard update continues; run install.ps1 once to refresh the menu.' -ForegroundColor Yellow
+        }
+      }
+    }
   }
   $legacy = Join-Path $AppDir 'mapsim-menu.ps1'
-  if ((Test-Path $legacy) -and ($legacy -ne $MenuPath)) {
+  if ((Test-Path $legacy) -and ($legacy -ne $MenuPath) -and ($legacy -ne $PSCommandPath)) {
     Remove-Item $legacy -Force -ErrorAction SilentlyContinue
   }
 }
