@@ -18,7 +18,12 @@ FALLBACK_VERSION="dashboard-v1.0.9"
 # install.sh runs once and a dashboard update never touches this file, so the
 # menu refreshes itself from GitHub (refresh_menu_self) instead of staying at
 # whatever version happened to be downloaded that first time.
-MENU_VERSION=1.1.0
+#
+# This number must move whenever this file's behaviour does, or an installed copy
+# on the same number never sees the fix: refresh_menu_self only replaces the file
+# when the published value is greater. It is kept equal to $MapsimMenuVersion in
+# mapsim-menu.ps1, because both platforms ship the same fixes.
+MENU_VERSION=1.1.1
 MENU_URL="https://raw.githubusercontent.com/$REPO/main/Dashboard_Release/mapsim-menu.sh"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
