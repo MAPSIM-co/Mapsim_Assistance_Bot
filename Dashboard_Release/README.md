@@ -346,9 +346,11 @@ No Python installation is required.
 
 ## Language (English / فارسی)
 
-The dashboard and the `Mapsim_BOT` control center both speak English and
-Persian. The two languages share one code path - no logic, no calculation and
-no trading value differs between them; only the visible text is swapped.
+The dashboard and the Windows `Mapsim_BOT` control center both speak English
+and Persian. The two languages share one code path - no logic, no calculation
+and no trading value differs between them; only the visible text is swapped.
+The macOS / Linux menu (`mapsim-menu.sh`) stays English: those terminals shape
+Persian themselves, so the language switch is a Windows feature.
 
 **Dashboard (web page).** The `EN` / `FA` pill in the masthead switches the
 language instantly. The pill always names the language it switches **to**, not
@@ -360,13 +362,13 @@ page switches to `dir="rtl"`, uses a Persian font stack (Vazirmatn, IRANSansX,
 IRANSans, Segoe UI, Tahoma) and normalises letter spacing, so nothing is clipped
 or reversed.
 
-**Control center (its own window).** Press **L** in the main menu (or pick the
-`Language` item) to toggle between English and Persian. The item follows the
-same rule as the web pill - it shows the language you are about to switch to,
-`Language: FA` in the English menu and `زبان: EN` in the Persian one, while the
-`Language` row of the panel keeps showing the language in use. The choice is
-saved in `%APPDATA%\MapsimDashboard\dashboard-lang` on Windows and is read on
-the next start; the panel is redrawn in the selected language.
+**Control center (its own window, Windows).** Press **L** in the main menu (or
+pick the `Language` item) to toggle between English and Persian. The item
+follows the same rule as the web pill - it shows the language you are about to
+switch to, `Language: FA` in the English menu and `زبان: EN` in the Persian one,
+while the `Language` row of the panel keeps showing the language in use. The
+choice is saved in `%APPDATA%\MapsimDashboard\dashboard-lang` on Windows and is
+read on the next start; the panel is redrawn in the selected language.
 
 In Persian the control center opens a small window of its own instead of
 drawing into the console. A Windows console cannot do either half of Persian
@@ -375,19 +377,29 @@ Persian with numbers and English words out piece by piece from the left - so the
 sentence reads scrambled in Windows 10, Windows 11, Windows Server and in every
 font, and no console setting fixes it. The window keeps the same menu code and
 paints it into a right-to-left log with an input box and a `تأیید` button, so
-only the destination of the text changes. It picks the first font it finds from
-Vazirmatn, Vazir, IRANSansX, IRANSans, IRANYekan, Sahel, Shabnam, Segoe UI and
-Tahoma - all of them shape Persian - so nothing has to be installed. Persian
-lines are right-aligned and the Persian sentences wrap normally; the menu is
-numbered `۱` to `۱۴`, and answers typed with a Persian keyboard (`۱`, `۲`, and
-بله / خیر for yes / no) are understood everywhere the menu asks for a number or
-a y/n. If the window cannot be opened, the menu says so and stays usable in the
-console.
+only the destination of the text changes.
+
+A window is not a fixed-width console, so the page is drawn for the window
+instead of copied from the console: the header is a real wordmark
+(`MAPSIM BOT`) with a subtitle instead of the console's block-art logo, the
+separators are measured from the window width so they span the whole page,
+every line keeps its own indent, and every line is aligned once - right for
+Persian - so nothing is ragged. The menu keeps the same items, colours and
+numbering as the console, wraps long text instead of running off the page, and
+counts `۱` to `۱۴` plus `L` for the language. It picks the first font it finds
+from Vazirmatn, Vazir, IRANSansX, IRANSans, IRANYekan, Sahel, Shabnam, Segoe UI
+and Tahoma - all of them shape Persian - so nothing has to be installed. Answers
+typed with a Persian keyboard (`۱`, `۲`, and بله / خیر for yes / no) are
+understood everywhere the menu asks for a number or a y/n. If the window cannot
+be opened, the menu says so and stays usable in the console.
 
 English is unchanged: it still runs in the console with the same box frame and
-the same layout as before. `-Console` (or `MAPSIM_MENU_CONSOLE=1`) forces the
-console even for Persian, for terminals such as Windows Terminal that can render
-the text themselves.
+the same layout as before. Pressing **L** in the Persian window closes it and
+brings the console back - including the console window that the `Mapsim_BOT`
+shortcut hides while the Persian window is open - so the English menu is never
+painted into a right-to-left page. `-Console` (or `MAPSIM_MENU_CONSOLE=1`)
+forces the console even for Persian, for terminals such as Windows Terminal that
+can render the text themselves.
 
 **What stays in English.** Anything that is an original name rather than a
 label is never translated: symbols and tickers, Expert Advisor input names, CSV

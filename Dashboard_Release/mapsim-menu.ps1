@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.1.1'
+$MapsimMenuVersion = '1.1.2'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
@@ -196,6 +196,7 @@ $script:FaText = @{
   'Language'                          = 'زبان'
   'Persian'                           = 'فارسی'
   'English'                           = 'انگلیسی'
+  'Dashboard control center'          = 'مرکز کنترل داشبورد'
   'please choose 1-14 or L.'          = 'یک شماره از ۱ تا ۱۴ یا L را وارد کنید.'
   'bye.'                              = 'خداحافظ.'
 
@@ -1342,6 +1343,15 @@ $BoxL    = [string][char]0x251C
 $BoxR    = [string][char]0x2524
 
 function Show-Title {
+  # The console logo is block art: a window with a shaped, proportional font
+  # paints it as a smear wider than the page, so the window gets a wordmark
+  # built from real text and the console keeps the art it can draw.
+  if ($script:GuiHost) {
+    Write-Host ''
+    Write-GuiWordmark
+    Write-Host 'Dashboard control center' -ForegroundColor DarkGray
+    return
+  }
   Write-Host ''
   Write-Host ($Magenta + '    ##   ##  #####  ######   ###### ####### ##   ##   #####   #####  #######'.Replace('#', $BlockCh) + $NoColor)
   Write-Host ($Magenta + '    ### ### ##   ## ##   ## ##      ##      ### ###  ##   ## ##   ##   ###  '.Replace('#', $BlockCh) + $NoColor)
@@ -1350,29 +1360,47 @@ function Show-Title {
   Write-Host ($Magenta + '    ##   ## ##   ## ##      ######  ####### ##   ##  ######   #####    ###  '.Replace('#', $BlockCh) + $NoColor)
 }
 
-# Persian is written right to left and the letters join, so a padded cell of a
-# fixed width cannot line up. In Persian the frame keeps its horizontal rules but
-# the rows and items drop the two vertical bars and the padding; the text itself
-# is the same, only the box around it changes.
+# A padded cell of a fixed width can never line up in Persian: the script joins
+# letters, so the width of a word is not the sum of its characters. Whenever the
+# text is drawn without a console able to pad it - the window, and the console
+# when it is showing Persian - the frame drops the vertical bars and the padding
+# and keeps only a horizontal rule. English in the console keeps the full box.
+function Test-PlainUi {
+  return [bool]($script:GuiHost -or $script:MapsimLang -eq 'fa')
+}
+
 function Ui-Top {
-  if ($script:MapsimLang -eq 'fa') { Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return }
+  if (Test-PlainUi) {
+    if ($script:GuiHost) { Write-GuiRule; return }
+    Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return
+  }
   Write-Host ($Cyan + $BoxTL + ($BoxH * 79) + $BoxTR + $NoColor)
 }
 function Ui-Sep {
-  if ($script:MapsimLang -eq 'fa') { Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return }
+  if (Test-PlainUi) {
+    if ($script:GuiHost) { Write-GuiRule; return }
+    Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return
+  }
   Write-Host ($Cyan + $BoxL + ($BoxH * 79) + $BoxR + $NoColor)
 }
 function Ui-Bottom {
-  if ($script:MapsimLang -eq 'fa') { Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return }
+  if (Test-PlainUi) {
+    if ($script:GuiHost) { Write-GuiRule; return }
+    Write-Host ($Cyan + ($BoxH * 79) + $NoColor); return
+  }
   Write-Host ($Cyan + $BoxBL + ($BoxH * 79) + $BoxBR + $NoColor)
 }
 
 function Ui-Row([string]$Label, [string]$Plain, [string]$Colored) {
   if (-not $Colored) { $Colored = $Plain }
-  if ($script:MapsimLang -eq 'fa') {
+  if (Test-PlainUi) {
+    # 'label: value' with the label tinted, so a status reads as one sentence
+    # instead of a padded table cell. The window aligns the line by language.
     $faLabel = Find-FaText $Label
     $faValue = Find-FaText $Plain
-    Write-Host ('  ' + $faLabel + ': ' + $Colored.Replace($Plain, $faValue))
+    $valueText = $faValue
+    if ($Colored -ne $Plain) { $valueText = $Colored.Replace($Plain, $faValue) }
+    Write-Host ('  ' + $Cyan + $faLabel + $NoColor + ': ' + $valueText)
     return
   }
   $body = '{0,-10}: {1}' -f $Label, $Colored
@@ -1384,8 +1412,10 @@ function Ui-Row([string]$Label, [string]$Plain, [string]$Colored) {
 
 function Ui-Item([string]$Num, [string]$Text) {
   $faText = Find-FaText $Text
-  if ($script:MapsimLang -eq 'fa') {
-    Write-Host ('   ' + $Magenta + (ConvertTo-FaDigits ('{0,2}' -f $Num)) + $NoColor + ' - ' + $White + $faText + $NoColor)
+  if (Test-PlainUi) {
+    $shown = '{0,2}' -f $Num
+    if ($script:MapsimLang -eq 'fa') { $shown = ConvertTo-FaDigits $shown }
+    Write-Host ('   ' + $Magenta + $shown + $NoColor + ' - ' + $White + $faText + $NoColor)
     return
   }
   Write-Host ($Cyan + $BoxV + $NoColor + '   ' + $Magenta + ('{0,2}' -f $Num) + $NoColor + ' - ' + $White + ('{0,-71}' -f $Text) + $NoColor + $Cyan + $BoxV + $NoColor)
@@ -1671,10 +1701,13 @@ function Show-Menu {
           # Switching to Persian in a console session must open the window now:
           # a console cannot draw Persian, so it must never fall back to one.
           Initialize-MapsimHost
-          if ($script:GuiHost -and $script:GuiButton) { try { $script:GuiButton.Text = 'تأیید' } catch { } }
+          Set-GuiLanguage
           Write-Host 'زبان فارسی فعال شد.'
         } else {
-          if ($script:GuiHost -and $script:GuiButton) { try { $script:GuiButton.Text = 'OK' } catch { } }
+          # English belongs to the console: it gets its box frame and its padded
+          # rows back. Leaving the window open painted an English page into a
+          # right-to-left log, which is the broken English layout reported.
+          Close-MapsimHost
           Write-Host 'English is active.'
         }
         continue
@@ -1870,6 +1903,7 @@ $script:GuiAnswer = $null
 $script:GuiPending = ''
 $script:GuiSnapTaken = $false
 $script:GuiSnapshot = $env:MAPSIM_MENU_SNAPSHOT
+$script:GuiTitleFont = $null
 
 # Any machine that can run the dashboard also has Segoe UI or Tahoma, both of
 # which shape Persian, so the window never needs a font file installed; a bundled
@@ -1885,6 +1919,69 @@ function Get-GuiFontFamily {
   return 'Segoe UI'
 }
 
+# One page, one direction. Persian reads from the right; English reads from the
+# left and is drawn by the console, but the window still honours it when it has
+# to paint an English line.
+function Get-GuiAlignment {
+  if ($script:MapsimLang -eq 'fa') { return 'Right' }
+  return 'Left'
+}
+
+# A console rule is 79 characters. In a window that is a short line floating at
+# one edge of a 940-pixel page, so the rule is measured from the mono font and
+# spans the page; it is recomputed on every redraw, so it follows a resize.
+function Get-GuiRuleCount {
+  $width = 0
+  try { $width = $script:GuiLog.ClientSize.Width } catch { }
+  if ($width -le 0) { $width = 900 }
+  $unit = 0
+  try {
+    $sample = [string][char]0x2500
+    $unit = [System.Windows.Forms.TextRenderer]::MeasureText(($sample * 10), $script:GuiMono).Width / 10.0
+  } catch { }
+  if ($unit -le 0) { $unit = 7 }
+  $count = [int](($width - 40) / $unit)
+  if ($count -lt 24) { $count = 24 }
+  return $count
+}
+
+function Write-GuiRule {
+  $line = [string][char]0x2500
+  Write-Host ($Cyan + ($line * (Get-GuiRuleCount)) + $NoColor)
+}
+
+# The window title is text, not art: one wordmark at a size a proportional font
+# can draw without clipping.
+function Write-GuiWordmark {
+  $log = $script:GuiLog
+  if (-not $log -or -not $script:GuiTitleFont) { return }
+  $log.SelectionStart = $log.TextLength
+  $log.SelectionLength = 0
+  try { $log.SelectionAlignment = Get-GuiAlignment } catch { }
+  $log.SelectionFont = $script:GuiTitleFont
+  $log.SelectionColor = [System.Drawing.ColorTranslator]::FromHtml('#D2A8FF')
+  # One colour run on purpose: two runs split the wordmark into two bidi units,
+  # and a right-to-left page lays those units out backwards ('BOT MAPSIM').
+  # The accent colour goes on the subtitle line instead.
+  $log.AppendText("MAPSIM BOT`n")
+  $log.SelectionStart = $log.TextLength
+  $log.ScrollToCaret()
+}
+
+# The direction is set from the language every time it changes: an English page
+# painted into a right-to-left window is exactly the broken English layout that
+# was reported, so this pair of calls is the guard against it.
+function Set-GuiLanguage {
+  if (-not $script:GuiForm) { return }
+  $rtl = ($script:MapsimLang -eq 'fa')
+  $direction = $(if ($rtl) { 'Yes' } else { 'No' })
+  try { $script:GuiForm.RightToLeft = $direction } catch { }
+  try { $script:GuiForm.RightToLeftLayout = $rtl } catch { }
+  try { $script:GuiLog.RightToLeft = $direction } catch { }
+  try { $script:GuiInput.RightToLeft = $direction } catch { }
+  try { $script:GuiButton.Text = $(if ($rtl) { 'تأیید' } else { 'OK' }) } catch { }
+}
+
 # The console colours (30-37) on a dark log; the palette is the same as the
 # console one so a red line still means the same thing.
 function Get-GuiColor([object]$Code, [string]$Fallback = '#E6EDF3') {
@@ -1898,6 +1995,7 @@ function Get-GuiColor([object]$Code, [string]$Fallback = '#E6EDF3') {
     35 { return '#D2A8FF' }
     36 { return '#56D4DD' }
     37 { return '#E6EDF3' }
+    90 { return '#8B949E' }
   }
   return $Fallback
 }
@@ -1911,7 +2009,8 @@ function Get-GuiTintCode([object]$Tint) {
     'Magenta' { return 35 }
     'Cyan' { return 36 }
     'White' { return 37 }
-    'Gray' { return 37 }
+    'Gray' { return 90 }
+    'DarkGray' { return 90 }
   }
   return 0
 }
@@ -1937,10 +2036,13 @@ function Write-GuiLine([string]$Text, [bool]$NoNewline, [object]$Tint) {
   $log = $script:GuiLog
   # The console padded a label with spaces to line its colon up; a proportional
   # font does not need that and the gap reads as a hole inside the sentence.
+  # Only runs inside the line are collapsed - the leading spaces are the indent
+  # of the row and must survive, or every line loses its margin.
   if ($Text -match '[\u0600-\u06FF]') {
-    $Text = (($Text.TrimEnd() -replace '[ \t]{2,}', ' ') -replace ' +:', ':')
+    $indent = [regex]::Match($Text, '^[ \t]+').Value
+    $rest = $Text.Substring($indent.Length)
+    $Text = $indent + (($rest.TrimEnd() -replace '[ \t]{2,}', ' ') -replace ' +:', ':')
   }
-  $fa = $Text -match '[\u0600-\u06FF]'
   $base = Get-GuiColor -Code (Get-GuiTintCode $Tint)
   if ($log.TextLength -gt 150000) {
     try {
@@ -1952,9 +2054,10 @@ function Write-GuiLine([string]$Text, [bool]$NoNewline, [object]$Tint) {
   }
   $log.SelectionStart = $log.TextLength
   $log.SelectionLength = 0
-  # A paragraph carries one alignment: Persian sentences read from the right,
-  # paths, URLs and the box rules stay on the left.
-  $log.SelectionAlignment = $(if ($fa) { 'Right' } else { 'Left' })
+  # A page carries one alignment, taken from the language of the page. Mixing
+  # them by line leaves the menu ragged on one side, and an English page in a
+  # right-to-left log is exactly the broken English layout reported on 1.0.9.
+  $log.SelectionAlignment = Get-GuiAlignment
   $log.SelectionFont = $(if ($Text -match '[\u2588\u2500-\u254B]') { $script:GuiMono } else { $script:GuiFont })
   $cursor = 0
   foreach ($m in [regex]::Matches($Text, "$([char]27)\[([0-9;]*)m")) {
@@ -2047,6 +2150,8 @@ function Initialize-MapsimHost {
     catch { $script:GuiFont = New-Object System.Drawing.Font('Segoe UI', 11.5) }
     try { $script:GuiMono = New-Object System.Drawing.Font('Consolas', 10.5) }
     catch { $script:GuiMono = $script:GuiFont }
+    try { $script:GuiTitleFont = New-Object System.Drawing.Font($family, 21, [System.Drawing.FontStyle]::Bold) }
+    catch { $script:GuiTitleFont = New-Object System.Drawing.Font('Segoe UI', 21, [System.Drawing.FontStyle]::Bold) }
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'Mapsim BOT'
@@ -2056,8 +2161,6 @@ function Initialize-MapsimHost {
     $form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#14161B')
     $form.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#E6EDF3')
     $form.Font = $script:GuiFont
-    $form.RightToLeft = 'Yes'
-    $form.RightToLeftLayout = $true
 
     $log = New-Object System.Windows.Forms.RichTextBox
     $log.Dock = 'Fill'
@@ -2070,7 +2173,6 @@ function Initialize-MapsimHost {
     $log.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#14161B')
     $log.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#E6EDF3')
     $log.Font = $script:GuiFont
-    $log.RightToLeft = 'Yes'
     $log.DetectUrls = $false
 
     $panel = New-Object System.Windows.Forms.Panel
@@ -2093,12 +2195,11 @@ function Initialize-MapsimHost {
     $input.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#0F1115')
     $input.ForeColor = [System.Drawing.ColorTranslator]::FromHtml('#E6EDF3')
     $input.Font = $script:GuiFont
-    $input.RightToLeft = 'Yes'
     $input.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 0)
 
     $ok = New-Object System.Windows.Forms.Button
     $ok.Dock = 'Fill'
-    $ok.Text = 'تأیید'
+    $ok.Text = 'OK'
     $ok.FlatStyle = 'Flat'
     $ok.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#2F6FEB')
     $ok.ForeColor = [System.Drawing.Color]::White
@@ -2127,27 +2228,70 @@ function Initialize-MapsimHost {
     $script:GuiButton = $ok
     $script:GuiAlive = $true
     $script:GuiHost = $true
+    # Direction, button text and input alignment all come from the language;
+    # nothing here is hard-wired to right-to-left.
+    Set-GuiLanguage
     $form.Show()
     [System.Windows.Forms.Application]::DoEvents()
     $form.Activate()
 
     # The shim owns the console window it opened, so it is hidden once the menu
     # has a window of its own; started from an existing terminal the console is
-    # left alone.
+    # left alone. Close-MapsimHost brings it back when the menu returns to
+    # English.
     if ($env:MAPSIM_MENU_SHIM -eq '1') {
-      try {
-        if (-not ('Mapsim.ConsoleHost' -as [type])) {
-          Add-Type -Namespace Mapsim -Name ConsoleHost -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
-        }
-        $handle = [Mapsim.ConsoleHost]::GetConsoleWindow()
-        if ($handle -ne [IntPtr]::Zero) { [void][Mapsim.ConsoleHost]::ShowWindow($handle, 0) }
-      } catch { }
+      $hostType = Get-ConsoleHostType
+      if ($hostType) {
+        try {
+          $handle = $hostType::GetConsoleWindow()
+          if ($handle -ne [IntPtr]::Zero) { [void]$hostType::ShowWindow($handle, 0) }
+        } catch { }
+      }
     }
   } catch {
     $script:GuiHost = $false
     $script:GuiAlive = $false
     Write-Host 'note: the Persian window could not be opened; the menu continues in this console.'
     Write-Host 'note: Persian needs the window; press L and choose English for the console.'
+  }
+}
+
+# The console handle is needed twice: once to hide the console the shim opened,
+# once to bring it back when the menu switches to English.
+function Get-ConsoleHostType {
+  if (-not ('Mapsim.ConsoleHost' -as [type])) {
+    try {
+      Add-Type -Namespace Mapsim -Name ConsoleHost -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);'
+    } catch { return $null }
+  }
+  return ('Mapsim.ConsoleHost' -as [type])
+}
+
+# Closing the window is not the same as exiting the menu: the console takes the
+# next page. English is a console language here, so leaving the window open
+# would paint it into a right-to-left page - the broken layout reported on 1.0.9.
+function Close-MapsimHost {
+  if (-not $script:GuiHost) { return }
+  $script:GuiAlive = $false
+  $script:GuiHost = $false
+  try { $script:GuiForm.Close() } catch { }
+  try { $script:GuiForm.Dispose() } catch { }
+  $script:GuiForm = $null
+  $script:GuiLog = $null
+  $script:GuiPanel = $null
+  $script:GuiInput = $null
+  $script:GuiButton = $null
+  $script:GuiPending = ''
+  $script:GuiSnapTaken = $false
+  $hostType = Get-ConsoleHostType
+  if ($hostType) {
+    try {
+      $handle = $hostType::GetConsoleWindow()
+      if ($handle -ne [IntPtr]::Zero) {
+        [void]$hostType::ShowWindow($handle, 5)
+        [void]$hostType::SetForegroundWindow($handle)
+      }
+    } catch { }
   }
 }
 
