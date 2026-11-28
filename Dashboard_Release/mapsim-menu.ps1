@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.3.0'
+$MapsimMenuVersion = '1.3.1'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
@@ -442,6 +442,8 @@ $script:FaText = @{
 
   # --- licence verdicts and one-line results --------------------------------
   'ready - built from the Expert licence' = 'آماده — از لایسنس اکسپرت ساخته شده'
+  'unreadable - item 1 rebuilds it' = 'خوانا نیست — گزینه ۱ بازسازی می‌کند'
+  'the dashboard login ends before the licence - rebuild it (item 1)' = 'ورود داشبورد پیش از لایسنس تمام می‌شود — با گزینه ۱ بازسازی کنید'
   'not built yet - item 1 or it builds itself on start' = 'هنوز ساخته نشده — گزینه ۱، یا هنگام اجرا خودکار ساخته می‌شود'
   'not built yet - item 1 builds it from your Expert licence.' = 'هنوز ساخته نشده — گزینه ۱ آن را از لایسنس اکسپرت می‌سازد.'
   'not registered - the Expert cannot read the licence' = 'ثبت نشده — اکسپرت لایسنس را نمی‌بیند'
@@ -522,6 +524,12 @@ $script:FaRules = @(
 
   # --- values inside those lines -----------------------------------------
   @{ p = '^dashboard login: ready \((.+)\)$'; r = 'ورود داشبورد: آماده ({0})' }
+  # The dashboard row of the card. The date inside the sealed login is compared
+  # with the end of the licence, so a login that is complete but dated to the
+  # 72 h lease reads as a warning instead of a green "ready".
+  @{ p = '^ready - ends (.+)$'; r = 'آماده — تا {0}' }
+  @{ p = '^ends (.+) - the licence ends later, item 1 rebuilds it$'; r = 'تا {0} است ولی لایسنس دیرتر تمام می‌شود — گزینه ۱ بازسازی می‌کند' }
+  @{ p = '^the login ends (.+) but the licence ends (.+) UTC - item 1 rebuilds it$'; r = 'ورود تا {0} است ولی لایسنس تا {1} UTC — گزینه ۱ بازسازی می‌کند' }
   @{ p = '^the Expert licence cannot open the dashboard \((.+)\): (.+)$'; r = 'لایسنس اکسپرت داشبورد را باز نمی‌کند ({0}): {1}' }
   @{ p = '^the dashboard login could not be saved - (.+)$'; r = 'ورود داشبورد ذخیره نشد — {0}' }
   @{ p = '^  login    : (.+)$'; r = '  کاربر: {0}' }
@@ -962,6 +970,21 @@ function Show-LicenseStatus {
   Write-Host "    $LicenseAuthFile" -ForegroundColor DarkGray
   if ($message) { Write-Tag $kind $message }
   if ($warning) { Write-Tag 'WARN' $warning }
+  # The binary answers ACTIVE because the login is in date today. The date sealed
+  # inside the file is what decides when it stops, and a login built before Agent
+  # 2.2.0 carries the 72 h lease end - so say so here as well, or this card and
+  # the licence card would disagree about the same login.
+  $loginEnd = Get-DashboardLoginExpiry $LicenseFile
+  $licUtc = [string](Get-AgentFields)['license_expiry_utc']
+  if ($loginEnd -and $licUtc -and $licUtc -ne '-') {
+    $licEnd = $null
+    $loginEndDate = $null
+    try { $licEnd = [datetime]::ParseExact($licUtc, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) } catch { }
+    try { $loginEndDate = [datetime]::ParseExact($loginEnd, 'yyyy.MM.dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) } catch { }
+    if ($licEnd -and $loginEndDate -and $loginEndDate.Date -lt $licEnd.Date) {
+      Write-Tag 'WARN' "the login ends $loginEnd but the licence ends $licUtc UTC - item 1 rebuilds it"
+    }
+  }
   Write-Host ''
 }
 
@@ -1013,8 +1036,25 @@ function Show-LicenseMenu {
       $endKind = 'WARN'; $endText = "$licUtc UTC - expired"
     }
 
-    if ($saved) { $dashKind = 'OK'; $dashText = 'ready - built from the Expert licence' }
-    else { $dashKind = 'WARN'; $dashText = 'not built yet - item 1 or it builds itself on start' }
+    # The dashboard half ends on the date sealed inside its own file, and that
+    # date is what the customer's login stops at - not the presence of the file.
+    # Only the day is compared: the two clocks differ by the machine's offset.
+    $dashEnd = Get-DashboardLoginExpiry $LicenseFile
+    $licEnd = $null
+    if ($licUtc -and $licUtc -ne '-') {
+      try { $licEnd = [datetime]::ParseExact($licUtc, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) } catch { $licEnd = $null }
+    }
+    $dashStale = $false
+    if ($saved -and $dashEnd -and $licEnd) {
+      try {
+        $loginEnd = [datetime]::ParseExact($dashEnd, 'yyyy.MM.dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
+        $dashStale = $loginEnd.Date -lt $licEnd.Date
+      } catch { $dashStale = $false }
+    }
+    if (-not $saved) { $dashKind = 'WARN'; $dashText = 'not built yet - item 1 or it builds itself on start' }
+    elseif (-not $dashEnd) { $dashKind = 'WARN'; $dashText = 'unreadable - item 1 rebuilds it' }
+    elseif ($dashStale) { $dashKind = 'WARN'; $dashText = "ends $dashEnd - the licence ends later, item 1 rebuilds it" }
+    else { $dashKind = 'OK'; $dashText = "ready - ends $dashEnd" }
 
     if ($folders -gt 0) { $termKind = 'OK'; $termText = "linked: $folders MetaTrader folder(s)" }
     else { $termKind = 'WARN'; $termText = 'not registered - the Expert cannot read the licence' }
@@ -1022,7 +1062,7 @@ function Show-LicenseMenu {
     if ($hourly) { $autoKind = 'OK'; $autoText = 'hourly task installed' }
     else { $autoKind = 'WARN'; $autoText = 'not scheduled - item 10 turns it on' }
 
-    $next = Get-LicenceNextStep $state $saved $folders
+    $next = Get-LicenceNextStep $state $saved $folders $dashStale
 
     Ui-Top
     Ui-Status 'Licence' $expKind $expText
@@ -1079,7 +1119,7 @@ function Show-LicenseMenu {
 
 # What the customer should do next, worked out from the same five facts the
 # screen above prints, so the recommendation and the rows can never disagree.
-function Get-LicenceNextStep([string]$State, [bool]$Saved, [int]$Folders) {
+function Get-LicenceNextStep([string]$State, [bool]$Saved, [int]$Folders, [bool]$DashStale = $false) {
   if (-not (Test-Path $AgentLeaseFile)) {
     return @{ Kind = 'WARN'; Text = 'activate the Expert first - item 4 asks for the serial' }
   }
@@ -1094,6 +1134,9 @@ function Get-LicenceNextStep([string]$State, [bool]$Saved, [int]$Folders) {
   }
   if (-not $Saved) {
     return @{ Kind = 'WARN'; Text = 'build the dashboard login from the same serial (item 1)' }
+  }
+  if ($DashStale) {
+    return @{ Kind = 'WARN'; Text = 'the dashboard login ends before the licence - rebuild it (item 1)' }
   }
   return @{ Kind = 'OK'; Text = 'nothing to do - the Expert and the dashboard are ready' }
 }
@@ -1373,6 +1416,38 @@ function Write-DashboardLicense($Material) {
   & icacls $LicenseAuthFile '/inheritance:r' '/grant:r' "${me}:(R,W)" | Out-Null
 }
 
+# The login file is sealed with the key the dashboard build carries, so the menu
+# can read the date inside it instead of treating "a file exists" as "the login
+# is right". A login built by Agent 2.1 or older holds the end of the 72 h lease,
+# not the end of the licence: the file is complete and the dashboard stops
+# accepting it a year early, which is the same "2 days" the card used to show.
+# Returns 'yyyy.MM.dd HH:mm', or '' when the file is missing or not readable.
+function Get-DashboardLoginExpiry([string]$Path) {
+  if (-not (Test-Path $Path)) { return '' }
+  try {
+    $hex = ((Get-Content $Path -Raw) -replace '\s', '')
+    if ($hex.Length -lt 32 -or ($hex.Length % 2) -ne 0) { return '' }
+    $bytes = New-Object 'byte[]' ($hex.Length / 2)
+    for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
+    $aes = [Security.Cryptography.Aes]::Create()
+    try {
+      $aes.Mode = [Security.Cryptography.CipherMode]::ECB
+      $aes.Padding = [Security.Cryptography.PaddingMode]::None
+      $aes.Key = [Text.Encoding]::ASCII.GetBytes($DashAesKey)
+      $plain = $aes.CreateDecryptor().TransformFinalBlock($bytes, 0, $bytes.Length)
+    } finally { $aes.Dispose() }
+    $text = ([Text.Encoding]::ASCII.GetString($plain)).TrimEnd([char]0)
+    # user-password-yyyy-mm-dd-hh-mm-code-account, and the first two fields may
+    # contain a dash, so the date is counted from the end.
+    $parts = $text.Split('-')
+    $n = $parts.Count
+    if ($n -lt 9) { return '' }
+    $stamp = '{0}.{1}.{2} {3}:{4}' -f $parts[$n - 7], $parts[$n - 6], $parts[$n - 5], $parts[$n - 4], $parts[$n - 3]
+    if ($stamp -notmatch '^\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}$') { return '' }
+    return $stamp
+  } catch { return '' }
+}
+
 # Rebuilds the dashboard login from the active Expert licence. Returns $false and
 # leaves $script:DashboardLoginNote set when the Expert half is not ready, so the
 # caller can say why instead of asking for a licence the customer never had.
@@ -1583,7 +1658,13 @@ function Show-AgentDevice {
 }
 
 function Toggle-AgentSchedule {
-  $null = & schtasks.exe /Query /TN $AgentTaskName 2>&1
+  # The same reason as Test-AgentSchedule: on a machine without the task,
+  # schtasks answers with "ERROR: The system cannot find the file specified" on
+  # stderr, and 2>&1 put that banner in the middle of the screen. Both streams
+  # are dropped; the exit code alone decides which way the toggle goes.
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & schtasks.exe /Query /TN $AgentTaskName *> $null } finally { $ErrorActionPreference = $previous }
   if ($LASTEXITCODE -eq 0) {
     & schtasks.exe /Delete /TN $AgentTaskName /F | Out-Null
     Write-Host 'automatic licence refresh removed.'

@@ -1092,6 +1092,50 @@ dashboard_login_write() {
   return 0
 }
 
+# The date sealed inside dashboard.license, as yyyy.mm.dd hh:mm, or empty when
+# there is no file or the tools to read it. A login built by Agent 2.1 or older
+# holds the end of the 72 h lease rather than the end of the licence: the file is
+# complete and the dashboard would stop accepting it a year early, so "a file
+# exists" is not "the login is right".
+dashboard_login_end() {
+  [ -s "$LICENSE_FILE" ] || return 0
+  command -v openssl >/dev/null 2>&1 || return 0
+  key=$(printf '%s' "$DASH_AES_KEY" | od -An -tx1 | tr -d ' \n')
+  # The file holds lowercase hex and the Windows menu may write it with CRLF, so
+  # the text is unwrapped first and then turned back into bytes: openssl reads
+  # raw bytes, and handing it the hex as text decrypts to garbage.
+  hex=$(tr -d ' \r\n' < "$LICENSE_FILE")
+  [ -n "$hex" ] || return 0
+  if command -v xxd >/dev/null 2>&1; then
+    plain=$(printf '%s' "$hex" | xxd -r -p |
+      openssl enc -d -aes-256-ecb -K "$key" -nosalt -nopad 2>/dev/null |
+      tr -d '\000')
+  elif command -v perl >/dev/null 2>&1; then
+    plain=$(printf '%s' "$hex" | perl -ne 'print pack("H*", $_)' |
+      openssl enc -d -aes-256-ecb -K "$key" -nosalt -nopad 2>/dev/null |
+      tr -d '\000')
+  else
+    return 0
+  fi
+  [ -n "$plain" ] || return 0
+  # user-password-yyyy-mm-dd-hh-mm-code-account, counted from the end because
+  # the first two fields may themselves contain a dash.
+  set -- $(printf '%s' "$plain" | awk -F- 'NF >= 9 { print $(NF-6), $(NF-5), $(NF-4), $(NF-3), $(NF-2) }')
+  [ $# -eq 5 ] || return 0
+  lend_year=$1
+  lend_month=$2
+  lend_day=$3
+  lend_hour=$4
+  lend_min=$5
+  for v in "$lend_year" "$lend_month" "$lend_day" "$lend_hour" "$lend_min"; do
+    case "$v" in
+      ''|*[!0-9]*) return 0 ;;
+    esac
+  done
+  [ ${#lend_year} -eq 4 ] || return 0
+  printf '%s.%s.%s %s:%s' "$lend_year" "$lend_month" "$lend_day" "$lend_hour" "$lend_min"
+}
+
 # dashboard_login_sync [quiet] - rebuild the login from the active Expert
 # licence. Returns 1 and leaves DASHBOARD_NOTE set when the Expert half is not
 # ready, so the caller can say why instead of asking for a second licence.
@@ -1432,6 +1476,8 @@ license_rows() {
   ldays=""
   lexp=""
   lterms=""
+  lend=""
+  ldashstale=""
   if [ -f "$AGENT_LEASE" ] && agent_present; then
     lout=$(agent_invoke status 2>&1) || true
     lstate=$(license_field "$lout" status)
@@ -1467,9 +1513,26 @@ license_rows() {
   fi
 
   if license_saved; then
-    ui_status "Dashboard" OK "ready - built from the Expert licence"
-  else
+    lend=$(dashboard_login_end)
+  fi
+  # Both dates are yyyy-mm-dd once the dots are turned into dashes, so a plain
+  # lexicographic compare is a date compare here.
+  if [ -n "$lend" ] && [ -n "$lexp" ] && [ "$lexp" != "-" ]; then
+    llic_day="${lexp%% *}"
+    llogin_day=$(printf '%s' "${lend%% *}" | tr '.' '-')
+    if [ "$llogin_day" \< "$llic_day" ]; then
+      ldashstale="1"
+    fi
+  fi
+
+  if ! license_saved; then
     ui_status "Dashboard" WARN "not built yet - item 1 or it builds itself on start"
+  elif [ -z "$lend" ]; then
+    ui_status "Dashboard" WARN "unreadable - item 1 rebuilds it"
+  elif [ -n "$ldashstale" ]; then
+    ui_status "Dashboard" WARN "ends $lend - the licence ends later, item 1 rebuilds it"
+  else
+    ui_status "Dashboard" OK "ready - ends $lend"
   fi
 
   if [ "$lterms" -gt 0 ]; then
@@ -1495,6 +1558,8 @@ license_rows() {
     ui_status "Next step" WARN "register the MetaTrader folder (item 6) or the Expert reads no licence"
   elif ! license_saved; then
     ui_status "Next step" WARN "build the dashboard login from the same serial (item 1)"
+  elif [ -n "$ldashstale" ]; then
+    ui_status "Next step" WARN "the dashboard login ends before the licence - rebuild it (item 1)"
   else
     ui_status "Next step" OK "nothing to do - the Expert and the dashboard are ready"
   fi
