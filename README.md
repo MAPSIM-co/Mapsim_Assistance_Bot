@@ -212,6 +212,14 @@ The same actions are also available as installer flags (`--public`,
   like the EA (active code, expiry, account number from the live snapshot).
   Without a valid license the dashboard does not start, and the web sign-in is
   the license username and password.
+- **Activate the Expert with your serial** — the same license item carries the
+  Expert half: **4)** activate with the serial (the menu registers your
+  MetaTrader folder first, otherwise the Expert reports `NO LEASE`), **5)**
+  status, **7)** refresh now, **10)** hourly automatic refresh,
+  **11)** remove it from this machine. The serial decides which licence you
+  bought — assistant (every phase-one feature except automatic trading) or full
+  — so the menu never asks you to pick a model, and the licence Agent is
+  downloaded on first use: `Mapsim_BOT` stays the only menu a customer needs.
 - **Watch the dashboard from the internet / other devices** — run `Mapsim_BOT`
   and choose **7) Access mode (local / internet)** (or reinstall with
   `--public` / `-Public`): it binds to all network interfaces and asks for the

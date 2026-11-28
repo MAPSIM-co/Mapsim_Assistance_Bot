@@ -24,6 +24,7 @@ either the tooling that produces those builds or instructions for using them.
 | `entry.py` | Frozen-app entry point (safe logging in windowed builds) |
 | `smoke_test.py` | Launches a built app on a free port and verifies the API and assets |
 | `requirements-build.txt` | Build-time Python dependencies |
+| `../Agent/mapsim_license_agent.py` | The licence Agent the control center downloads on first use (kept outside this folder so the menu can fetch it from one raw URL) |
 | `.github/workflows/dashboard-build.yml` (repository root) | Four-runner CI matrix and tagged GitHub releases |
 
 ---
@@ -84,6 +85,7 @@ setup):
 │  App       : installed                                                        │
 │  Expert    : v213.1.6                                                         │
 │  License   : saved                                                            │
+│  Expert lic: not activated                                                    │
 │  Access    : internet (0.0.0.0) - port 8766                                   │
 │  URL       : http://203.0.113.10:8766/                                        │
 │  Snapshot  : ok (12s ago)                                                     │
@@ -139,12 +141,22 @@ you can copy it), whether the live snapshot file is being read
                                      `C:` and other drive letters are mapped to the
                                      detected Wine prefix and `MQL5/Files/MapsimLive/
                                      snapshot.json` is derived from it
- 13) License (dashboard login)     - enter or update the Mapsim license (license
-                                     code + username + password), show its status
-                                     (user, account, expiry, days left) or remove
-                                     it. The dashboard only starts with a valid,
-                                     unexpired license and uses the same username
-                                     and password for the web sign-in
+ 13) License (dashboard login +    - a submenu with two halves, both yours:
+     Expert)
+                                       1-3 enter or update the dashboard login
+                                           (license code + username + password),
+                                           show its status (user, account,
+                                           expiry, days left) or remove it. The
+                                           dashboard only starts with a valid,
+                                           unexpired license and uses the same
+                                           username and password for the web
+                                           sign-in
+                                      4-11 the Expert licence (serial): activate
+                                           with the serial, status, register the
+                                           MetaTrader folder, refresh now,
+                                           verify, device identity, automatic
+                                           refresh on/off, remove it from this
+                                           machine
  14) Update policy (notify/auto/off)- how a newer dashboard release is handled
                                      (see **Dashboard updates** below)
  15) Exit
@@ -156,7 +168,7 @@ you can copy it), whether the live snapshot file is being read
                                      survives an update
 
 The Windows menu (`mapsim-menu.ps1`) has no separate snapshot item, so the
-numbering there shifts up by one: **12) License (dashboard login)**,
+numbering there shifts up by one: **12) License (dashboard login + Expert)**,
 **13) Update policy** and **14) Exit**. Every other option number is the same on
 all platforms.
 
@@ -207,6 +219,35 @@ and are only saved when the license is active. They are stored in
 - The web sign-in (local and internet) is the license username and password.
 - If the snapshot is not there yet, the dashboard starts with a warning and
   enforces the account number as soon as the snapshot appears.
+
+#### The Expert licence (serial)
+
+Items **4-11** of menu 13 manage the Expert's own licence - the serial key you
+were sold. It is a different credential from the dashboard login: the Expert
+reads its lease from `<MQL5>/Files/MapsimLive`, so the two can be set up in the
+same place without being the same thing.
+
+There are exactly two products and one menu. The serial knows which product it
+was sold as (assistant: every phase-one feature except automatic trading, or
+full), the server answers with that product in the lease and the menu never
+asks you to choose one - so the same key and the same items work for both.
+
+- **4) Activate** is the only step a new customer needs. On the first run the
+  menu registers the MetaTrader folder (item 6 does it on its own), asks for the
+  serial, activates and copies the lease into every terminal it found.
+- Without that folder the lease stays in `~/.mapsim` and the Expert reports
+  `NO LEASE` - a missing path, not a broken key.
+- **10) automatic refresh** installs an hourly job (Task Scheduler, systemd user
+  timer or launchd agent) so the lease is renewed in the background; the Agent
+  itself only calls the server when the lease is older than six hours, so the
+  hourly wake-up costs one process start and no network. Without it the lease is
+  refreshed whenever you use the menu.
+- **11) remove** deletes the licence and the terminal copies; the Expert then
+  keeps managing open trades but opens no new ones.
+- The Agent (`mapsim_license_agent.py`) is downloaded on first use into
+  `~/.local/share/MapsimBOT/agent` (`%LOCALAPPDATA%\MapsimBOT\agent` on
+  Windows), so a customer never installs a second program and never opens a
+  second menu. Uninstall everything removes it, its job and its lease.
 
 ### Dashboard updates
 

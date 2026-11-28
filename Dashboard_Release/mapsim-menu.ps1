@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.1.2'
+$MapsimMenuVersion = '1.2.0'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
@@ -50,6 +50,18 @@ $TaskName = 'MapsimDashboard'
 $LicenseDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.mapsim'
 $LicenseFile = Join-Path $LicenseDir 'dashboard.license'
 $LicenseAuthFile = Join-Path $LicenseDir 'dashboard.auth'
+# The licence Agent (the EA half): the only thing on the customer machine that
+# talks to the licence server. It used to have its own menu
+# (Agent\mapsim-license.ps1), which meant two menus for one product; the
+# customer now does everything from here and never sees a second entry point.
+$AgentDir = Join-Path $MenuDir 'agent'
+$AgentExe = Join-Path $AgentDir 'dist\mapsim-license-agent.exe'
+$AgentPy = Join-Path $AgentDir 'mapsim_license_agent.py'
+$AgentUrl = "https://raw.githubusercontent.com/$Repo/main/Agent/mapsim_license_agent.py"
+$AgentLeaseFile = Join-Path $LicenseDir 'lease.json'
+$AgentTaskName = 'MapsimLicenseAgent'
+$script:AgentLauncher = $null
+$script:AgentSummary = $null
 $VersionFile = Join-Path $ConfigDir 'dashboard.version'
 $UpdatePolicyFile = Join-Path $ConfigDir 'update-policy'
 $UpdateCacheFile = Join-Path $ConfigDir 'update-cache.json'
@@ -125,7 +137,7 @@ $script:FaText = @{
   'Expert Advisor: install / update'  = 'اکسپرت: نصب / بروزرسانی'
   'Expert Advisor: version check'     = 'اکسپرت: بررسی نسخه'
   'Disk space / server storage'       = 'فضای دیسک / ذخیره‌سازی'
-  'License (dashboard login)'         = 'لایسنس (ورود به داشبورد)'
+  'License (dashboard login + Expert)' = 'لایسنس (ورود به داشبورد + اکسپرت)'
   'Update policy (notify / auto / off)' = 'روش بروزرسانی (اطلاع / خودکار / خاموش)'
   'Exit'                              = 'خروج'
   # The L item names the language it switches TO, never the one on screen, so
@@ -234,6 +246,66 @@ $script:FaText = @{
   'please choose 1-3.'                = 'یک شماره از ۱ تا ۳ وارد کنید.'
   'no (choose 2 to install it)'       = 'خیر (برای نصب گزینه ۲ را بزنید)'
 
+  # --- licence agent (the Expert's serial) ---------------------------------
+  # One menu for the whole product: the Agent used to have its own window.
+  'one menu for everything: the dashboard login and the Expert licence' = 'همه چیز در همین منو: ورود داشبورد و لایسنس اکسپرت'
+  'Expert licence'                    = 'لایسنس اکسپرت'
+  'Dashboard login (username / password)' = 'ورود داشبورد (نام کاربری / رمز)'
+  'Expert licence (serial)'           = 'لایسنس اکسپرت (سریال)'
+  '4) Activate the Expert with a serial' = '۴) فعال‌سازی اکسپرت با سریال'
+  '5) Show the Expert licence status'  = '۵) نمایش وضعیت لایسنس اکسپرت'
+  '6) Register the MetaTrader folder (MQL5)' = '۶) معرفی پوشه متاتریدر (MQL5)'
+  '7) Refresh the Expert licence now'  = '۷) به‌روزرسانی همین حالا لایسنس اکسپرت'
+  '8) Verify the licence locally'      = '۸) بررسی محلی لایسنس'
+  '9) Device identity (for support)'   = '۹) شناسه دستگاه (برای پشتیبانی)'
+  '10) Automatic refresh on / off'     = '۱۰) به‌روزرسانی خودکار روشن / خاموش'
+  '11) Remove the licence from this machine' = '۱۱) حذف لایسنس از این دستگاه'
+  'choose 0-11 (0 = back)'            = 'یک شماره از ۰ تا ۱۱ وارد کنید (۰ = بازگشت)'
+  'please choose 0-11.'               = 'یک شماره از ۰ تا ۱۱ وارد کنید.'
+  'not activated'                     = 'فعال نشده'
+  'not readable - the Agent is missing' = 'خوانده نشد — Agent موجود نیست'
+  'the licence Agent was downloaded to:' = 'Agent لایسنس در این مسیر دانلود شد:'
+  'hint: check the internet, then try again; the dashboard is not affected.' = 'راهنما: اینترنت را بررسی کنید و دوباره تلاش کنید؛ به داشبورد دست زده نشد.'
+  'the licence Agent is not installed yet.' = 'Agent لایسنس هنوز نصب نشده است.'
+  'choose 5 or activate once - the menu downloads it automatically.' = 'گزینه ۵ را بزنید یا یک بار فعال‌سازی کنید — منو آن را خودکار دانلود می‌کند.'
+  'error: Python was not found, and no frozen Agent is installed.' = 'خطا: Python پیدا نشد و نسخه بسته‌بندی‌شده Agent هم نصب نیست.'
+  'hint: install Python 3, or drop the frozen mapsim-license-agent.exe into the agent\dist folder.' = 'راهنما: Python 3 را نصب کنید یا فایل mapsim-license-agent.exe را در پوشه agent\dist بگذارید.'
+  'the EA reads the licence from <MQL5>\Files\MapsimLive.' = 'اکسپرت لایسنس را از <MQL5>\Files\MapsimLive می‌خواند.'
+  'MQL5 folder (empty = find it automatically)' = 'مسیر پوشه MQL5 (خالی = جستجوی خودکار)'
+  'the MetaTrader folder was not registered - without it the EA cannot see the licence.' = 'پوشه متاتریدر معرفی نشد — بدون آن اکسپرت لایسنس را نمی‌بیند.'
+  'continue with the activation anyway? (y/n)' = 'بدون آن هم فعال‌سازی ادامه یابد؟ (y/N)'
+  'licence serial (MAPSIM-XXXX-XXXX-XXXX-XXXX)' = 'سریال لایسنس (MAPSIM-XXXX-XXXX-XXXX-XXXX)'
+  'no serial was entered.'             = 'سریالی وارد نشد.'
+  'activated.'                        = 'فعال شد.'
+  'that serial is not valid.'         = 'این سریال معتبر نیست.'
+  'this serial was already used - ask support to move it to this machine.' = 'این سریال قبلاً استفاده شده — برای انتقال به این دستگاه با پشتیبانی تماس بگیرید.'
+  'this machine could not be identified - send the device identity to support.' = 'این دستگاه شناسایی نشد — شناسه دستگاه (گزینه ۹) را برای پشتیبانی بفرستید.'
+  'the licence server could not be reached - check the internet and try again.' = 'به سرور لایسنس دسترسی نبود — اینترنت را بررسی و دوباره تلاش کنید.'
+  'the server refused the activation - read the message above.' = 'سرور فعال‌سازی را رد کرد — پیام بالا را بخوانید.'
+  'this licence is revoked or suspended.' = 'این لایسنس لغو یا معلق شده است.'
+  'this licence belongs to another machine - ask support to move it.' = 'این لایسنس برای دستگاه دیگری است — برای انتقال با پشتیبانی تماس بگیرید.'
+  'in MetaTrader 5: attach the Expert to a chart and allow DLL imports.' = 'در MetaTrader 5: اکسپرت را روی چارت بیندازید و اجازه DLL بدهید.'
+  'the licence was refreshed.'         = 'لایسنس به‌روز شد.'
+  'the licence server could not be reached - check the internet.' = 'به سرور لایسنس دسترسی نبود — اینترنت را بررسی کنید.'
+  'this licence belongs to another machine.' = 'این لایسنس برای دستگاه دیگری است.'
+  'the local licence is valid.'       = 'لایسنس محلی معتبر است.'
+  'the local licence is not valid - see the code above.' = 'لایسنس محلی معتبر نیست — کد بالا را ببینید.'
+  'automatic licence refresh removed.' = 'به‌روزرسانی خودکار لایسنس حذف شد.'
+  'automatic licence refresh enabled (every hour).' = 'به‌روزرسانی خودکار لایسنس فعال شد (هر ساعت).'
+  'the scheduled refresh could not be created.' = 'به‌روزرسانی زمان‌بندی‌شده ساخته نشد.'
+  'this machine has no licence to remove.' = 'لایسنسی برای حذف روی این دستگاه نیست.'
+  'remove the licence from this machine? the Expert stops trading (y/n)' = 'لایسنس از این دستگاه حذف شود؟ اکسپرت معامله نمی‌کند (y/N)'
+  'the licence was removed from this machine.' = 'لایسنس از این دستگاه حذف شد.'
+  # A verdict is a word, never a sentence: it is printed inside a line.
+  'ACTIVE'                            = 'فعال'
+  'GRACE'                             = 'دورهٔ ارفاق'
+  'EXPIRED'                           = 'منقضی'
+  'NO_LEASE'                          = 'بدون لایسنس'
+  'REVOKED'                           = 'لغو‌شده'
+  'SUSPENDED'                         = 'معلق'
+  'assist'                            = 'دستیار'
+  'full'                              = 'کامل'
+
   # --- start / stop / status lines ---------------------------------------
   'error: a valid Mapsim license is required - the dashboard was not started.' = 'خطا: لایسنس معتبر Mapsim لازم است — داشبورد اجرا نشد.'
   'open menu 12 (License) and enter or fix the license.' = 'گزینه ۱۲ (لایسنس) را باز کنید و لایسنس را وارد یا اصلاح کنید.'
@@ -314,6 +386,8 @@ $script:FaRules = @(
   @{ p = '^service\s*:\s*(.+)$'; r = 'اجرای خودکار: {0}' }
   @{ p = '^bind\s*:\s*(.+)$'; r = 'آدرس اتصال: {0}' }
   @{ p = '^license\s*:\s*(.+)$'; r = 'لایسنس: {0}' }
+  @{ p = '^Expert licence\s*:\s*(.+)$'; r = 'لایسنس اکسپرت: {0}' }
+  @{ p = '^expert\s*:\s*(.+)$'; r = 'اکسپرت: {0}' }
   @{ p = '^disk\s*:\s*(.+)$'; r = 'دیسک: {0}' }
   @{ p = '^firewall\s*:\s*(.+)$'; r = 'فایروال: {0}' }
   @{ p = '^port (\d+)\s*:\s*(.+)$'; r = 'پورت {0}: {1}' }
@@ -337,6 +411,9 @@ $script:FaRules = @(
   @{ p = '^installed \((.+)\)$'; r = 'نصب‌شده ({0})' }
   @{ p = '^installed, (.+), (.+)$'; r = 'نصب‌شده، {0}، {1}' }
   @{ p = '^active - (.+), expires (.+)$'; r = 'فعال — {0}، انقضا {1}' }
+  # The Expert's licence line: a verdict, an optional product and the days left.
+  @{ p = '^([A-Z_]+) \((assist|full)\), (\d+) day\(s\) left$'; r = '{0} ({1})، {2} روز باقی‌مانده' }
+  @{ p = '^([A-Z_]+), (\d+) day\(s\) left$'; r = '{0}، {1} روز باقی‌مانده' }
   @{ p = '^(.+) \((.*)\) - dashboard will not start$'; r = '{0} ({1}) — داشبورد اجرا نمی‌شود' }
   @{ p = '^dashboard answering \(HTTP (\d+)\)$'; r = 'داشبورد پاسخ می‌دهد (HTTP {0})' }
   @{ p = '^(.+) \(trimmed automatically above 256 KB\)$'; r = '{0} (بالای ۲۵۶ کیلوبایت خودکار کوتاه می‌شود)' }
@@ -369,6 +446,9 @@ $script:FaRules = @(
   @{ p = '^choose 1-(\d+) \(or ''a'' for all\)$'; r = 'یک شماره از ۱ تا {0} (یا ''a'' برای همه)' }
   @{ p = '^done\. From now on manage everything with:\s*(.+)$'; r = 'تمام شد. از این پس همه چیز را با این دستور مدیریت کنید:  {0}' }
   @{ p = '^the dashboard was not (.+)-ed\.$'; r = 'داشبورد {0} نشد.' }
+  @{ p = '^activation failed \(code (\d+)\)\.$'; r = 'فعال‌سازی ناموفق (کد {0}).' }
+  @{ p = '^refresh failed \(code (\d+)\)\.$'; r = 'به‌روزرسانی ناموفق (کد {0}).' }
+  @{ p = '^error: the licence Agent could not be installed - (.+)$'; r = 'خطا: Agent لایسنس نصب نشد — {0}' }
 
   # --- numbers ------------------------------------------------------------
   @{ p = '^(\S+)\s+([\d.,]+) GB free of\s+([\d.,]+) GB\s+\((\d+)% used\)\s*(.*)$'; r = '{0}   {1} گیگابایت آزاد از {2} گیگابایت ({3}٪ مصرف)   {4}' }
@@ -727,23 +807,262 @@ function Show-LicenseMenu {
     Clear-Host
     Show-Title
     Write-Host 'License'
-    Write-Host '  dashboard login uses the license username/password'
+    Write-Host '  one menu for everything: the dashboard login and the Expert licence'
     if (Test-LicenseSaved) { Write-Host "  saved: yes ($LicenseFile)" } else { Write-Host '  saved: no' }
+    Write-Host ('  Expert licence : ' + (Get-AgentSummary))
     Write-Host ''
+    Write-Host '  Dashboard login (username / password)'
     Write-Host '  1) Enter / update license'
     Write-Host '  2) Show license status'
     Write-Host '  3) Remove saved license'
+    Write-Host ''
+    Write-Host '  Expert licence (serial)'
+    Write-Host '  4) Activate the Expert with a serial'
+    Write-Host '  5) Show the Expert licence status'
+    Write-Host '  6) Register the MetaTrader folder (MQL5)'
+    Write-Host '  7) Refresh the Expert licence now'
+    Write-Host '  8) Verify the licence locally'
+    Write-Host '  9) Device identity (for support)'
+    Write-Host ' 10) Automatic refresh on / off'
+    Write-Host ' 11) Remove the licence from this machine'
+    Write-Host ''
     Write-Host '  0) Back to the main menu'
-    $c = Read-Host "`nchoose 1-3 (0 = back)"
+    $c = Read-Host "`nchoose 0-11 (0 = back)"
     switch ($c) {
       '0' { return }
       '1' { Enter-License | Out-Null }
       '2' { Show-LicenseStatus }
       '3' { Remove-License }
-      default { Write-Host 'please choose 1-3.' }
+      '4' { Activate-Agent }
+      '5' { Show-AgentStatus }
+      '6' { Register-AgentTerminal '' | Out-Null }
+      '7' { Update-AgentLease }
+      '8' { Test-AgentLease }
+      '9' { Show-AgentDevice }
+      '10' { Toggle-AgentSchedule }
+      '11' { Remove-AgentLease }
+      default { Write-Host 'please choose 0-11.' }
     }
     $null = Read-Host "`nPress Enter to continue"
   }
+}
+
+# ---------------------------------------------------------------- licence agent
+# The half of the product that talks to the licence server. It used to ship
+# with its own menu (Agent\mapsim-license.ps1), so a customer had two entry
+# points for one product; it is folded in here and the second menu is gone.
+#
+# The Agent is a single-shot CLI (spec 9.2) and knows nothing about MetaTrader
+# folders. Without `link-terminal` the lease is written into ~/.mapsim but never
+# reaches <MQL5>\Files\MapsimLive, the EA reads no lease, and the customer sees
+# NO_LEASE with no explanation. This menu is the only place that order is
+# enforced: link the terminal, then activate, then refresh.
+#
+# Delivery: the menu is installed alone, so the Agent is fetched from the
+# product repository the first time it is needed and kept next to the menu. A
+# frozen build dropped into agent\dist wins, so a machine without Python works.
+
+function Test-AgentPresent {
+  return ((Test-Path $AgentExe) -or (Test-Path $AgentPy))
+}
+
+function Install-Agent {
+  if (Test-AgentPresent) { return $true }
+  try {
+    New-Item -ItemType Directory -Force $AgentDir | Out-Null
+    $text = (Invoke-WebRequest -Uri $AgentUrl -TimeoutSec 30 -UseBasicParsing).Content
+    if (-not ($text -is [string]) -or $text -notmatch 'AGENT_VERSION') {
+      throw 'the downloaded file is not the licence Agent.'
+    }
+    Set-Content -Path $AgentPy -Value $text -Encoding UTF8
+    Write-Host 'the licence Agent was downloaded to:'
+    Write-Host "  $AgentDir"
+    return $true
+  } catch {
+    Write-Host "error: the licence Agent could not be installed - $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host 'hint: check the internet, then try again; the dashboard is not affected.' -ForegroundColor Yellow
+    return $false
+  }
+}
+
+function Get-AgentLauncher([switch]$Quiet) {
+  if ($script:AgentLauncher) { return $script:AgentLauncher }
+  if (Test-Path $AgentExe) {
+    $script:AgentLauncher = @{ File = $AgentExe; Args = @() }
+    return $script:AgentLauncher
+  }
+  if (-not (Test-Path $AgentPy)) {
+    if (-not $Quiet) {
+      Write-Host 'the licence Agent is not installed yet.'
+      Write-Host 'choose 5 or activate once - the menu downloads it automatically.'
+    }
+    return $null
+  }
+  $python = Get-Command python -ErrorAction SilentlyContinue
+  if (-not $python) {
+    if (-not $Quiet) {
+      Write-Host 'error: Python was not found, and no frozen Agent is installed.' -ForegroundColor Red
+      Write-Host 'hint: install Python 3, or drop the frozen mapsim-license-agent.exe into the agent\dist folder.' -ForegroundColor Yellow
+    }
+    return $null
+  }
+  $script:AgentLauncher = @{ File = $python.Source; Args = @($AgentPy) }
+  return $script:AgentLauncher
+}
+
+# The output is captured and re-printed on purpose: in the Persian window a
+# child process writes to a console nobody can see, so the same lines must go
+# through Write-Host to reach the page. The Agent prints key=value and this menu
+# never reformats it - that contract is older than this window.
+function Invoke-Agent([string[]]$Arguments) {
+  $launcher = Get-AgentLauncher
+  if (-not $launcher) { return 1 }
+  $all = @($launcher.Args) + $Arguments
+  $text = (& $launcher.File @all 2>&1 | Out-String)
+  $code = $LASTEXITCODE
+  foreach ($line in ($text -split "`r?`n")) {
+    if ($line -ne '') { Write-Host $line }
+  }
+  $script:AgentSummary = $null
+  return $code
+}
+
+# One line for the submenu and the main frame. `status` is local (no network),
+# but starting the interpreter is the slow part, so the answer is cached until
+# an action changes it.
+function Get-AgentSummary {
+  if ($script:AgentSummary) { return $script:AgentSummary }
+  if (-not (Test-Path $AgentLeaseFile)) {
+    $script:AgentSummary = 'not activated'
+    return $script:AgentSummary
+  }
+  $launcher = Get-AgentLauncher -Quiet
+  if (-not $launcher) {
+    $script:AgentSummary = 'not readable - the Agent is missing'
+    return $script:AgentSummary
+  }
+  $all = @($launcher.Args) + @('status')
+  $text = (& $launcher.File @all 2>&1 | Out-String)
+  $state = Get-LicenseField $text 'status'
+  $product = Get-LicenseField $text 'product'
+  $days = Get-LicenseField $text 'days_left'
+  if (-not $state) { $state = 'unknown' }
+  $summary = $state
+  if ($product) { $summary = "$summary ($product)" }
+  if ($days -match '^\d+$') { $summary = "$summary, $days day(s) left" }
+  $script:AgentSummary = $summary
+  return $summary
+}
+
+function Show-AgentStatus {
+  if (-not (Install-Agent)) { return }
+  Write-Host ''
+  $null = Invoke-Agent @('status')
+  Write-Host ''
+}
+
+function Register-AgentTerminal([string]$Target) {
+  if (-not (Install-Agent)) { return $false }
+  if (-not $Target) {
+    Write-Host 'the EA reads the licence from <MQL5>\Files\MapsimLive.'
+    $Target = (Read-Host 'MQL5 folder (empty = find it automatically)').Trim('"')
+  }
+  $call = @('link-terminal')
+  if ($Target) { $call += @('--path', $Target) }
+  $code = Invoke-Agent $call
+  if ($code -ne 0) {
+    Write-Host 'the MetaTrader folder was not registered - without it the EA cannot see the licence.' -ForegroundColor Yellow
+    return $false
+  }
+  return $true
+}
+
+function Activate-Agent {
+  if (-not (Install-Agent)) { return }
+  if (-not (Test-Path $AgentLeaseFile)) {
+    # Order matters the first time: a lease with no terminal path is a licence
+    # the EA cannot see.
+    if (-not (Register-AgentTerminal '')) {
+      $a = Read-Default 'continue with the activation anyway? (y/n)' 'n'
+      if ($a -ne 'y') { return }
+    }
+  }
+  $serial = Read-Host 'licence serial (MAPSIM-XXXX-XXXX-XXXX-XXXX)'
+  if (-not $serial) { Write-Host 'no serial was entered.'; return }
+  # No --product: the serial decides which product was bought (D-68), so this
+  # one menu activates the assistant and the full licence alike.
+  $code = Invoke-Agent @('activate', '--serial', $serial)
+  switch ($code) {
+    0  { Write-Host 'activated.' }
+    10 { Write-Host 'that serial is not valid.' }
+    11 { Write-Host 'this serial was already used - ask support to move it to this machine.' }
+    12 { Write-Host 'this machine could not be identified - send the device identity to support.' }
+    13 { Write-Host 'the licence server could not be reached - check the internet and try again.' }
+    14 { Write-Host 'the server refused the activation - read the message above.' }
+    15 { Write-Host 'this licence is revoked or suspended.' }
+    16 { Write-Host 'this licence belongs to another machine - ask support to move it.' }
+    default { Write-Host "activation failed (code $code)." }
+  }
+  if ($code -eq 0) {
+    Write-Host 'in MetaTrader 5: attach the Expert to a chart and allow DLL imports.'
+  }
+}
+
+function Update-AgentLease {
+  if (-not (Install-Agent)) { return }
+  $code = Invoke-Agent @('refresh', '--force')
+  switch ($code) {
+    0  { Write-Host 'the licence was refreshed.' }
+    13 { Write-Host 'the licence server could not be reached - check the internet.' }
+    15 { Write-Host 'this licence is revoked or suspended.' }
+    16 { Write-Host 'this licence belongs to another machine.' }
+    default { Write-Host "refresh failed (code $code)." }
+  }
+}
+
+function Test-AgentLease {
+  if (-not (Install-Agent)) { return }
+  $code = Invoke-Agent @('verify')
+  if ($code -eq 0) { Write-Host 'the local licence is valid.' }
+  else { Write-Host 'the local licence is not valid - see the code above.' -ForegroundColor Yellow }
+}
+
+function Show-AgentDevice {
+  if (-not (Install-Agent)) { return }
+  Write-Host ''
+  $null = Invoke-Agent @('device-info')
+  Write-Host ''
+}
+
+function Toggle-AgentSchedule {
+  $null = & schtasks.exe /Query /TN $AgentTaskName 2>&1
+  if ($LASTEXITCODE -eq 0) {
+    & schtasks.exe /Delete /TN $AgentTaskName /F | Out-Null
+    Write-Host 'automatic licence refresh removed.'
+    return
+  }
+  $launcher = Get-AgentLauncher
+  if (-not $launcher) { return }
+  $target = '"{0}" {1}refresh' -f $launcher.File, (($launcher.Args | ForEach-Object { '"{0}" ' -f $_ }) -join '')
+  $null = & schtasks.exe /Create /SC HOURLY /TN $AgentTaskName /TR $target /F 2>&1
+  if ($LASTEXITCODE -eq 0) { Write-Host 'automatic licence refresh enabled (every hour).' }
+  else { Write-Host 'the scheduled refresh could not be created.' -ForegroundColor Yellow }
+}
+
+function Remove-AgentLease {
+  if (-not (Test-Path $AgentLeaseFile)) { Write-Host 'this machine has no licence to remove.'; return }
+  $a = Read-Default 'remove the licence from this machine? the Expert stops trading (y/n)' 'n'
+  if ($a -ne 'y') { Write-Host 'cancelled.'; return }
+  $null = Invoke-Agent @('uninstall')
+  Write-Host 'the licence was removed from this machine.'
+}
+
+# Uninstall-Everything calls this: a removed dashboard must not leave a licence
+# agent and its hourly task behind.
+function Remove-AgentInstall {
+  $null = & schtasks.exe /Query /TN $AgentTaskName 2>&1
+  if ($LASTEXITCODE -eq 0) { & schtasks.exe /Delete /TN $AgentTaskName /F | Out-Null }
+  if (Test-Path $AgentDir) { Remove-Item -Recurse -Force $AgentDir -ErrorAction SilentlyContinue }
 }
 
 function Get-DashboardPids {
@@ -1106,6 +1425,7 @@ function Show-Status {
     if ($lstatus -eq 'ACTIVE') { Write-Host "license   : ACTIVE - $luser, expires $lexp" }
     else { Write-Host "license   : $lstatus ($(Get-LicenseField $lic 'message')) - dashboard will not start" }
   }
+  Write-Host "expert    : $(Get-AgentSummary)"
   $sysDrive = Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':'))
   if ($null -ne $sysDrive.Used -and ($sysDrive.Used + $sysDrive.Free) -gt 0) {
     Write-Host ("disk      : {0} GB free of {1} GB ({2}% used)" -f [math]::Round($sysDrive.Free / 1GB, 1), [math]::Round(($sysDrive.Used + $sysDrive.Free) / 1GB, 1), [math]::Round($sysDrive.Used / ($sysDrive.Used + $sysDrive.Free) * 100))
@@ -1599,6 +1919,12 @@ function Show-Menu {
     if (Test-LicenseSaved) { $licPlain = 'saved'; $licCol = $Green + $licPlain + $NoColor }
     else { $licPlain = 'not set'; $licCol = $Red + $licPlain + $NoColor }
     Ui-Row 'License' $licPlain $licCol
+    # The Expert's own licence: taken from the Agent, which reads it locally.
+    $agentPlain = Get-AgentSummary
+    if ($agentPlain -like 'ACTIVE*') { $agentCol = $Green + $agentPlain + $NoColor }
+    elseif ($agentPlain -eq 'not activated') { $agentCol = $Yellow + $agentPlain + $NoColor }
+    else { $agentCol = $Red + $agentPlain + $NoColor }
+    Ui-Row 'Expert licence' $agentPlain $agentCol
     Ui-Row 'Access' $acc ($Cyan + $acc + $NoColor)
     Ui-Row 'Disk' $diskLine ($diskCol + $diskLine + $NoColor)
     if ($script:MapsimLang -eq 'fa') { $langPlain = 'Persian' } else { $langPlain = 'English' }
@@ -1615,7 +1941,7 @@ function Show-Menu {
     Ui-Item '9' 'Expert Advisor: install / update'
     Ui-Item '10' 'Expert Advisor: version check'
     Ui-Item '11' 'Disk space / server storage'
-    Ui-Item '12' 'License (dashboard login)'
+    Ui-Item '12' 'License (dashboard login + Expert)'
     Ui-Item '13' 'Update policy (notify / auto / off)'
     Ui-Item '14' 'Exit'
     Ui-Item 'L' 'Language: FA'
@@ -1874,6 +2200,7 @@ function Show-EaStatus {
 }
 
 function Uninstall-Everything {
+  Remove-AgentInstall
   Remove-Service
   Stop-Dashboard | Out-Null
   if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }

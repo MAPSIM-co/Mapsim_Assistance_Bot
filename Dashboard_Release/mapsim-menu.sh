@@ -23,7 +23,7 @@ FALLBACK_VERSION="dashboard-v1.0.9"
 # on the same number never sees the fix: refresh_menu_self only replaces the file
 # when the published value is greater. It is kept equal to $MapsimMenuVersion in
 # mapsim-menu.ps1, because both platforms ship the same fixes.
-MENU_VERSION=1.1.1
+MENU_VERSION=1.2.0
 MENU_URL="https://raw.githubusercontent.com/$REPO/main/Dashboard_Release/mapsim-menu.sh"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
@@ -50,6 +50,16 @@ WRAPPER="$HOME/.local/bin/mapsim-dashboard"
 LICENSE_DIR="$HOME/.mapsim"
 LICENSE_FILE="$LICENSE_DIR/dashboard.license"
 LICENSE_AUTH_FILE="$LICENSE_DIR/dashboard.auth"
+# The Expert's own licence (serial based). The Agent keeps its lease in the same
+# ~/.mapsim folder, so one directory holds everything the customer was given.
+AGENT_DIR="$HOME/.local/share/MapsimBOT/agent"
+AGENT_PY="$AGENT_DIR/mapsim_license_agent.py"
+AGENT_BIN="$AGENT_DIR/dist/mapsim-license-agent"
+AGENT_URL="https://raw.githubusercontent.com/$REPO/main/Agent/mapsim_license_agent.py"
+AGENT_LEASE="$LICENSE_DIR/lease.json"
+AGENT_TIMER="mapsim-license-agent"
+AGENT_LABEL="com.mapsim.license"
+AGENT_SUMMARY=""
 SERVICE_NAME="mapsim-dashboard.service"
 LABEL="com.mapsim.dashboard"
 
@@ -810,23 +820,379 @@ menu_license_remove() {
   echo "license removed."
 }
 
+# ---------------------------------------------------------------- licence agent
+# The half of the product that talks to the licence server. It used to ship
+# with its own menu (Agent/mapsim-license.sh), so a customer had two entry
+# points for one product; it is folded in here and the second menu is gone.
+#
+# The Agent is a single-shot CLI and knows nothing about MetaTrader folders.
+# Without 'link-terminal' the lease lands in ~/.mapsim but never reaches
+# <MQL5>/Files/MapsimLive, the EA reads no lease, and the customer sees NO_LEASE
+# with no explanation. This menu is the only place that order is enforced: link
+# the terminal, then activate, then refresh.
+#
+# Delivery: the menu is installed alone, so the Agent is fetched from the
+# product repository the first time it is needed and kept next to the menu. A
+# frozen build dropped into $AGENT_DIR/dist wins, so a machine without Python
+# works.
+
+agent_python() {
+  for c in python3 python; do
+    if command -v "$c" >/dev/null 2>&1; then
+      printf '%s\n' "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+agent_present() {
+  [ -x "$AGENT_BIN" ] || [ -f "$AGENT_PY" ]
+}
+
+agent_install() {
+  if agent_present; then return 0; fi
+  if ! command -v curl >/dev/null 2>&1; then
+    msg_err "curl is required to download the licence Agent."
+    return 1
+  fi
+  mkdir -p "$AGENT_DIR" || return 1
+  msg_info "downloading the licence Agent ..."
+  if ! curl -fsSL --max-time 30 "$AGENT_URL" -o "$AGENT_PY.new" 2>/dev/null; then
+    rm -f "$AGENT_PY.new"
+    msg_err "the licence Agent could not be downloaded (no internet?)."
+    echo "hint: check the connection and try again; the dashboard is not affected."
+    return 1
+  fi
+  if ! grep -q 'AGENT_VERSION' "$AGENT_PY.new" 2>/dev/null; then
+    rm -f "$AGENT_PY.new"
+    msg_err "the downloaded file is not the licence Agent."
+    return 1
+  fi
+  mv "$AGENT_PY.new" "$AGENT_PY"
+  chmod 600 "$AGENT_PY" 2>/dev/null || true
+  msg_ok "the licence Agent is installed in $AGENT_DIR"
+  return 0
+}
+
+# agent_invoke ARGS... -> runs the Agent and returns its own exit code. A frozen
+# build is preferred; otherwise Python runs the downloaded file.
+agent_invoke() {
+  if [ -x "$AGENT_BIN" ]; then
+    "$AGENT_BIN" "$@"
+  elif [ -f "$AGENT_PY" ]; then
+    py=$(agent_python) || {
+      msg_err "Python was not found, and no frozen Agent is installed."
+      echo "hint: install Python 3, or drop the frozen binary into $AGENT_DIR/dist."
+      return 1
+    }
+    "$py" "$AGENT_PY" "$@"
+  else
+    msg_warn "the licence Agent is not installed yet."
+    return 1
+  fi
+}
+
+# One line for the submenu and the main frame. 'status' is local (no network),
+# but starting the interpreter is the slow part, so the answer is cached until
+# an action changes it.
+agent_summary() {
+  if [ -n "${AGENT_SUMMARY:-}" ]; then
+    printf '%s\n' "$AGENT_SUMMARY"
+    return 0
+  fi
+  if [ ! -f "$AGENT_LEASE" ]; then
+    printf 'not activated\n'
+    return 0
+  fi
+  if ! agent_present; then
+    printf 'not readable - the Agent is missing\n'
+    return 0
+  fi
+  out=$(agent_invoke status 2>&1) || true
+  state=$(license_field "$out" status)
+  product=$(license_field "$out" product)
+  days=$(license_field "$out" days_left)
+  [ -z "$state" ] && state="unknown"
+  line=$state
+  [ -n "$product" ] && line="$line ($product)"
+  case "$days" in
+    ''|*[!0-9]*) ;;
+    *) line="$line, $days day(s) left" ;;
+  esac
+  AGENT_SUMMARY=$line
+  printf '%s\n' "$line"
+}
+
+agent_status() {
+  agent_install || return
+  echo ""
+  agent_invoke status || true
+  echo ""
+  AGENT_SUMMARY=""
+}
+
+# Register the MQL5 folder. Without an entry file the lease has nowhere to go and
+# the Expert only ever sees NO_LEASE - it is a missing path, not a bad licence.
+agent_link() {
+  agent_install || return 1
+  target=""
+  if [ ! -f "$AGENT_LEASE" ]; then
+    echo "the EA reads the licence from <MQL5>/Files/MapsimLive."
+    target=$(ask "MQL5 folder (empty = find it automatically)")
+    if wants_back "$target"; then
+      echo "back."
+      return 1
+    fi
+  fi
+  if [ -n "$target" ]; then
+    agent_invoke link-terminal --path "$target"
+  else
+    agent_invoke link-terminal
+  fi
+  rc=$?
+  AGENT_SUMMARY=""
+  if [ "$rc" -ne 0 ]; then
+    msg_warn "the MetaTrader folder was not registered - without it the EA cannot see the licence."
+    return 1
+  fi
+  return 0
+}
+
+agent_activate() {
+  agent_install || return
+  if [ ! -f "$AGENT_LEASE" ]; then
+    # Order matters the first time: a lease with no terminal path is a licence
+    # the EA cannot see.
+    if ! agent_link; then
+      a=$(ask_default "n" "continue with the activation anyway? (y/n)")
+      if wants_back "$a"; then return; fi
+      if [ "$a" != "y" ] && [ "$a" != "Y" ]; then return; fi
+    fi
+  fi
+  serial=$(ask "licence serial (MAPSIM-XXXX-XXXX-XXXX-XXXX)")
+  if wants_back "$serial"; then
+    echo "back."
+    return
+  fi
+  if [ -z "$serial" ]; then
+    echo "no serial was entered."
+    return
+  fi
+  # No --product: the serial decides which product was bought (D-68), so this
+  # one menu activates the assistant and the full licence alike.
+  agent_invoke activate --serial "$serial"
+  code=$?
+  AGENT_SUMMARY=""
+  case "$code" in
+    0) echo "activated."
+       echo "in MetaTrader 5: attach the Expert to a chart and allow DLL imports." ;;
+    10) echo "that serial is not valid." ;;
+    11) echo "this serial was already used - ask support to move it to this machine." ;;
+    12) echo "this machine could not be identified - send the device identity to support." ;;
+    13) echo "the licence server could not be reached - check the internet and try again." ;;
+    14) echo "the server refused the activation - read the message above." ;;
+    15) echo "this licence is revoked or suspended." ;;
+    16) echo "this licence belongs to another machine - ask support to move it." ;;
+    *) echo "activation failed (code $code)." ;;
+  esac
+}
+
+agent_refresh() {
+  agent_install || return
+  agent_invoke refresh --force
+  code=$?
+  AGENT_SUMMARY=""
+  case "$code" in
+    0) echo "the licence was refreshed." ;;
+    13) echo "the licence server could not be reached - check the internet." ;;
+    15) echo "this licence is revoked or suspended." ;;
+    16) echo "this licence belongs to another machine." ;;
+    *) echo "refresh failed (code $code)." ;;
+  esac
+}
+
+agent_verify() {
+  agent_install || return
+  agent_invoke verify
+  if [ $? -eq 0 ]; then
+    echo "the local licence is valid."
+  else
+    msg_warn "the local licence is not valid - see the code above."
+  fi
+}
+
+agent_device() {
+  agent_install || return
+  echo ""
+  agent_invoke device-info || true
+  echo ""
+}
+
+# systemd user timer on Linux, launchd agent on macOS: the lease is refreshed
+# every hour without the customer opening this menu.
+agent_timer_installed() {
+  if [ "$OS" = "Darwin" ]; then
+    [ -f "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist" ]
+  else
+    [ -f "$HOME/.config/systemd/user/$AGENT_TIMER.timer" ]
+  fi
+}
+
+agent_command() {
+  if [ -x "$AGENT_BIN" ]; then
+    printf '%s\n' "$AGENT_BIN"
+  elif [ -f "$AGENT_PY" ]; then
+    py=$(agent_python) || return 1
+    printf '%s %s\n' "$py" "$AGENT_PY"
+  else
+    return 1
+  fi
+}
+
+agent_launchd_install() {
+  cmd=$(agent_command) || return 1
+  plist="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+  mkdir -p "$HOME/Library/LaunchAgents" || return 1
+  {
+    echo '<?xml version="1.0" encoding="UTF-8"?>'
+    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    echo '<plist version="1.0">'
+    echo '<dict>'
+    echo "  <key>Label</key><string>$AGENT_LABEL</string>"
+    echo '  <key>ProgramArguments</key>'
+    echo '  <array>'
+    for part in $cmd; do echo "    <string>$part</string>"; done
+    echo '    <string>refresh</string>'
+    echo '  </array>'
+    echo '  <key>StartInterval</key><integer>3600</integer>'
+    echo '  <key>RunAtLoad</key><false/>'
+    echo '</dict>'
+    echo '</plist>'
+  } > "$plist"
+  launchctl unload "$plist" >/dev/null 2>&1 || true
+  launchctl load -w "$plist" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+agent_systemd_install() {
+  cmd=$(agent_command) || return 1
+  unit_dir="$HOME/.config/systemd/user"
+  mkdir -p "$unit_dir" || return 1
+  {
+    echo '[Unit]'
+    echo 'Description=Mapsim licence refresh'
+    echo ''
+    echo '[Service]'
+    echo 'Type=oneshot'
+    echo "ExecStart=$cmd refresh"
+  } > "$unit_dir/$AGENT_TIMER.service"
+  {
+    echo '[Unit]'
+    echo 'Description=Refresh the Mapsim licence every hour'
+    echo ''
+    echo '[Timer]'
+    echo 'OnBootSec=5min'
+    echo 'OnUnitActiveSec=1h'
+    echo ''
+    echo '[Install]'
+    echo 'WantedBy=timers.target'
+  } > "$unit_dir/$AGENT_TIMER.timer"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user enable --now "$AGENT_TIMER.timer" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+agent_schedule_remove() {
+  if [ "$OS" = "Darwin" ]; then
+    plist="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+    if [ -f "$plist" ]; then
+      launchctl unload "$plist" >/dev/null 2>&1 || true
+      rm -f "$plist"
+    fi
+  else
+    systemctl --user disable --now "$AGENT_TIMER.timer" >/dev/null 2>&1 || true
+    rm -f "$HOME/.config/systemd/user/$AGENT_TIMER.service" \
+          "$HOME/.config/systemd/user/$AGENT_TIMER.timer"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
+}
+
+agent_schedule() {
+  if agent_timer_installed; then
+    agent_schedule_remove
+    echo "automatic licence refresh removed."
+    return
+  fi
+  agent_install || return
+  if [ "$OS" = "Darwin" ]; then
+    if agent_launchd_install; then
+      echo "automatic licence refresh enabled (every hour)."
+    else
+      msg_warn "the scheduled refresh could not be created."
+    fi
+  else
+    if agent_systemd_install; then
+      echo "automatic licence refresh enabled (every hour)."
+    else
+      msg_warn "the scheduled refresh could not be created (no systemd user session)."
+    fi
+  fi
+}
+
+agent_remove() {
+  if [ ! -f "$AGENT_LEASE" ]; then
+    echo "this machine has no licence to remove."
+    return
+  fi
+  a=$(ask_default "n" "remove the licence from this machine? the Expert stops trading (y/n)")
+  if wants_back "$a"; then
+    echo "back."
+    return
+  fi
+  if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
+    echo "cancelled."
+    return
+  fi
+  agent_invoke uninstall || true
+  AGENT_SUMMARY=""
+  echo "the licence was removed from this machine."
+}
+
+# uninstall_everything calls this: a removed dashboard must not leave a licence
+# agent and its hourly refresh behind.
+agent_remove_install() {
+  agent_schedule_remove
+  rm -rf "$AGENT_DIR"
+}
+
 menu_license() {
   while true; do
     if [ -t 1 ]; then clear; fi
     show_title
     echo "License"
-    echo "  dashboard login uses the license username/password"
+    echo "  Dashboard login (username / password)"
     if license_saved; then
       echo "  saved: yes ($LICENSE_FILE)"
     else
       echo "  saved: no"
     fi
+    echo "  Expert licence (serial)"
+    echo "  status: $(agent_summary)"
     echo ""
     echo "  1) Enter / update license"
     echo "  2) Show license status"
     echo "  3) Remove saved license"
+    echo "  4) Activate the Expert with a serial"
+    echo "  5) Show the Expert licence status"
+    echo "  6) Register the MetaTrader folder"
+    echo "  7) Refresh the licence now"
+    echo "  8) Verify the local licence"
+    echo "  9) Show this device's identity"
+    echo " 10) Turn automatic refresh on / off"
+    echo " 11) Remove the licence from this machine"
     echo "  0) Back to the main menu"
-    printf '\n%s' "${CYAN}choose 1-3 (0 = back):${NC} "
+    printf '\n%s' "${CYAN}choose 0-11 (0 = back):${NC} "
     if ! IFS= read -r c; then
       echo ""
       exit 0
@@ -836,7 +1202,15 @@ menu_license() {
       1) menu_license_enter ;;
       2) menu_license_status ;;
       3) menu_license_remove ;;
-      *) echo "please choose 1-3." ;;
+      4) agent_activate ;;
+      5) agent_status ;;
+      6) agent_link ;;
+      7) agent_refresh ;;
+      8) agent_verify ;;
+      9) agent_device ;;
+      10) agent_schedule ;;
+      11) agent_remove ;;
+      *) echo "please choose 0-11." ;;
     esac
     printf '%s' "${CYAN}Press Enter to continue...${NC}"
     IFS= read -r _ || { echo ""; exit 0; }
@@ -1974,6 +2348,7 @@ show_status() {
       echo "license   : $lstatus ($(license_field "$out" message)) - dashboard will not start"
     fi
   fi
+  echo "expert    : $(agent_summary) (menu 13)"
 }
 
 ask_default() {
@@ -2269,6 +2644,9 @@ menu_ea_status() {
 
 uninstall_everything() {
   service_remove
+  # A removed dashboard must not leave a licence agent and its hourly refresh
+  # behind.
+  agent_remove_install
   remove_command_link
   stop_dashboard --force >/dev/null 2>&1 || true
   case "$OS" in
@@ -2813,6 +3191,13 @@ menu_main() {
       lic_plain="not set"
       lic_col="${RED}$lic_plain${NC}"
     fi
+    # The Expert's own licence: taken from the Agent, which reads it locally.
+    agent_plain=$(agent_summary)
+    case "$agent_plain" in
+      ACTIVE*) agent_col="${GREEN}$agent_plain${NC}" ;;
+      "not activated") agent_col="${YELLOW}$agent_plain${NC}" ;;
+      *) agent_col="${RED}$agent_plain${NC}" ;;
+    esac
     if service_installed; then
       if service_enabled; then svc_state="enabled"; else svc_state="disabled"; fi
       if service_running; then svc_run="running"; else svc_run="stopped"; fi
@@ -2835,6 +3220,7 @@ menu_main() {
     ui_row "Service" "$svc_plain" "$svc_col"
     ui_row "Expert" "$ea_plain" "$ea"
     ui_row "License" "$lic_plain" "$lic_col"
+    ui_row "Expert lic" "$agent_plain" "$agent_col"
     ui_row "Access" "$acc" "${CYAN}$acc${NC}"
     ui_row "URL" "$(access_url)"
     ui_row "Snapshot" "$snap_plain" "$snap_col"
@@ -2852,7 +3238,7 @@ menu_main() {
     ui_item "10" "Expert Advisor: version check"
     ui_item "11" "Disk space / server storage"
     ui_item "12" "Snapshot file / data source"
-    ui_item "13" "License (dashboard login)"
+    ui_item "13" "License (dashboard login + Expert)"
     ui_item "14" "Update policy (notify / auto / off)"
     ui_item "15" "Exit"
     ui_bottom
