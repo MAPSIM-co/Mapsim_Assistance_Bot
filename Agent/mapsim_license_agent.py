@@ -51,7 +51,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-AGENT_VERSION = "2.1.0"
+AGENT_VERSION = "2.2.0"
 AGENT_NAME = "mapsim-license-agent"
 
 # Architecture 3.3 / 5.5: the EA enforces the span, the Agent writes inside it.
@@ -777,11 +777,32 @@ class Verdict:
         return _as_int(self.payload.get("exp"))
 
     @property
+    def lic_exp(self) -> int:
+        """End of the paid term, or 0 on a lease signed before server v1.6.2."""
+        return _as_int(self.payload.get("lic_exp"))
+
+    @property
     def grace_until(self) -> int:
         return _as_int(self.payload.get("grace_until"))
 
     @property
+    def valid_until(self) -> int:
+        """When this licence finally stops, as opposed to when it renews.
+
+        ``exp`` is the *lease*: a 72 h ticket the Agent replaces every six
+        hours, so a yearly licence counted down from it reported "2 days"
+        (server v1.6.2 added ``lic_exp`` to fix exactly that). A lease written
+        by an older server has no ``lic_exp``, and then the lease is the most
+        this file can prove.
+        """
+        return self.lic_exp or self.exp
+
+    @property
     def days_left(self) -> int:
+        return max(0, (self.valid_until - now_ts()) // 86400)
+
+    @property
+    def lease_days(self) -> int:
         return max(0, (self.exp - now_ts()) // 86400)
 
     @property
@@ -789,14 +810,25 @@ class Verdict:
         return str(self.payload.get("key") or "")
 
     def lines(self) -> list[str]:
+        # ``expiry`` and ``days_left`` mean the licence, because that is what a
+        # customer reads; the lease keeps its own pair right below it. Both
+        # pairs are the same number when the server predates lic_exp.
+        valid = self.valid_until
         return [
             f"status={self.code}",
             f"code={self.code}",
             f"key={self.key_hint}",
             f"product={self.payload.get('prod', '')}",
-            f"expiry={self.exp}",
-            f"expiry_utc={utc_text(self.exp)}",
+            f"expiry={valid}",
+            f"expiry_utc={utc_text(valid)}",
             f"days_left={self.days_left}",
+            f"days_source={'licence' if self.lic_exp else 'lease'}",
+            f"license_expiry={self.lic_exp}",
+            f"license_expiry_utc={utc_text(self.lic_exp)}",
+            f"lease_expiry={self.exp}",
+            f"lease_expiry_utc={utc_text(self.exp)}",
+            f"lease_days={self.lease_days}",
+            f"grace_until_utc={utc_text(self.grace_until)}",
             f"entitlements={','.join(self.entitlements)}",
             f"warning={self.note}",
             f"agent={AGENT_VERSION}",
@@ -1207,8 +1239,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
                     "status": verdict.code,
                     "code": verdict.code,
                     "product": verdict.payload.get("prod", ""),
-                    "expiry": verdict.exp,
+                    "expiry": verdict.valid_until,
                     "days_left": verdict.days_left,
+                    "license_expiry": verdict.lic_exp,
+                    "lease_expiry": verdict.exp,
+                    "lease_days": verdict.lease_days,
                     "entries": verdict.entries,
                     "management": verdict.management,
                     "entitlements": verdict.entitlements,
@@ -1321,7 +1356,7 @@ def cmd_dashboard_login(args: argparse.Namespace) -> int:
         return EXIT_DENIED
 
     # In GRACE the dashboard keeps working to the end of grace, like the EA.
-    moment = verdict.exp if verdict.code == "ACTIVE" else max(verdict.exp, verdict.grace_until)
+    moment = verdict.valid_until if verdict.code == "ACTIVE" else max(verdict.valid_until, verdict.grace_until)
     expiry = time.strftime("%Y.%m.%d %H:%M", time.localtime(moment + _server_offset(snapshot)))
     print("status=OK")
     print(f"code={verdict.code}")

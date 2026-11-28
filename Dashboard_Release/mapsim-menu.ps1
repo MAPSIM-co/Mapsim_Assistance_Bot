@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.2.2'
+$MapsimMenuVersion = '1.3.0'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
@@ -59,9 +59,13 @@ $AgentExe = Join-Path $AgentDir 'dist\mapsim-license-agent.exe'
 $AgentPy = Join-Path $AgentDir 'mapsim_license_agent.py'
 $AgentUrl = "https://raw.githubusercontent.com/$Repo/main/Agent/mapsim_license_agent.py"
 $AgentLeaseFile = Join-Path $LicenseDir 'lease.json'
+# The MQL5 folder(s) the Agent writes the lease into. One path per line; empty
+# or missing means the Expert cannot see the licence at all.
+$AgentMql5File = Join-Path $LicenseDir 'ea_mql5.txt'
 $AgentTaskName = 'MapsimLicenseAgent'
 $script:AgentLauncher = $null
 $script:AgentSummary = $null
+$script:AgentFields = $null
 # Why the derived dashboard login could not be built; printed by the callers.
 $script:DashboardLoginNote = ''
 $VersionFile = Join-Path $ConfigDir 'dashboard.version'
@@ -286,6 +290,7 @@ $script:FaText = @{
   '10) Automatic refresh on / off'     = '۱۰) به‌روزرسانی خودکار روشن / خاموش'
   '11) Remove the licence from this machine' = '۱۱) حذف لایسنس از این دستگاه'
   'choose 0-11 (0 = back)'            = 'یک شماره از ۰ تا ۱۱ وارد کنید (۰ = بازگشت)'
+  'please choose 0-12.'               = 'یک شماره از ۰ تا ۱۲ وارد کنید.'
   'please choose 0-11.'               = 'یک شماره از ۰ تا ۱۱ وارد کنید.'
   'not activated'                     = 'فعال نشده'
   'not readable - the Agent is missing' = 'خوانده نشد — Agent موجود نیست'
@@ -392,6 +397,90 @@ $script:FaText = @{
   'starting the dashboard (local mode) ...' = 'در حال اجرای داشبورد (حالت محلی) ...'
   'auto-start task started again with the new version.' = 'اجرای خودکار با نسخه جدید دوباره اجرا شد.'
   'stopping the manually started dashboard - the task will run it.' = 'داشبوردی که دستی اجرا شده بود متوقف می‌شود — اجرای خودکار آن را اجرا می‌کند.'
+
+  # --- licence screens (values, tags, rows) --------------------------------
+  # The three verdict tags: the whole point is that these are the only words a
+  # customer has to recognise to know whether something is fine.
+  '[ OK ]'                            = '[ موفق ]'
+  '[WARN]'                            = '[ هشدار ]'
+  '[FAIL]'                            = '[ خطا ]'
+  '[INFO]'                            = '[ اطلاع ]'
+  'Licence'                           = 'لایسنس'
+  'Valid to'                          = 'معتبر تا'
+  'Terminal'                          = 'متاتریدر'
+  'Refresh'                           = 'بروزرسانی'
+  'Next step'                         = 'قدم بعدی'
+  'Result'                            = 'نتیجه'
+  'Product'                           = 'محصول'
+  'Grace to'                          = 'مهلت تا'
+  'Lease'                             = 'مهلت تمدید'
+  'Rights'                            = 'دسترسی‌ها'
+  'Agent'                             = 'ایجنت'
+  'Device'                            = 'دستگاه'
+  'Note'                              = 'یادداشت'
+  'Login'                             = 'کاربر'
+  'Password'                          = 'رمز عبور'
+  'Account'                           = 'حساب'
+  'Files'                             = 'فایل‌ها'
+  'it renews itself whenever the Expert licence is refreshed.' = 'با هر بار به‌روزرسانی لایسنس اکسپرت، خودکار تمدید می‌شود.'
+  'Dashboard login - same serial, nothing extra to buy' = 'ورود داشبورد — همان سریال، چیز اضافه‌ای لازم نیست'
+  'Expert licence - the serial from the shop' = 'لایسنس اکسپرت — همان سریالی که از فروشگاه خریدید'
+  'Support'                           = 'پشتیبانی'
+  'Build / refresh the dashboard login now' = 'ساخت / بازسازی ورود داشبورد همین حالا'
+  'Show the dashboard login status'  = 'نمایش وضعیت ورود داشبورد'
+  'Remove the saved dashboard login' = 'حذف ورود داشبورد ذخیره‌شده'
+  'Activate the Expert with a serial' = 'فعال‌سازی اکسپرت با سریال'
+  'Show the Expert licence in detail' = 'نمایش جزئیات لایسنس اکسپرت'
+  'Register the MetaTrader folder (MQL5)' = 'ثبت پوشه متاتریدر (MQL5)'
+  'Refresh the Expert licence now'   = 'به‌روزرسانی فوری لایسنس اکسپرت'
+  'Verify the licence locally (no internet)' = 'بررسی لایسنس به‌صورت محلی (بدون اینترنت)'
+  'Device identity (send this to support)' = 'شناسه دستگاه (برای ارسال به پشتیبانی)'
+  'Automatic refresh on / off'      = 'روشن/خاموش کردن بروزرسانی خودکار'
+  'Remove the licence from this machine' = 'حذف لایسنس از این رایانه'
+  'Enter an old dashboard licence (only if support sent one)' = 'وارد کردن لایسنس قدیمی داشبورد (فقط اگر پشتیبانی فرستاده باشد)'
+  'Back to the main menu'           = 'بازگشت به منوی اصلی'
+
+  # --- licence verdicts and one-line results --------------------------------
+  'ready - built from the Expert licence' = 'آماده — از لایسنس اکسپرت ساخته شده'
+  'not built yet - item 1 or it builds itself on start' = 'هنوز ساخته نشده — گزینه ۱، یا هنگام اجرا خودکار ساخته می‌شود'
+  'not built yet - item 1 builds it from your Expert licence.' = 'هنوز ساخته نشده — گزینه ۱ آن را از لایسنس اکسپرت می‌سازد.'
+  'not registered - the Expert cannot read the licence' = 'ثبت نشده — اکسپرت لایسنس را نمی‌بیند'
+  'hourly task installed'           = 'زمان‌بند ساعتی نصب است'
+  'not scheduled - item 10 turns it on' = 'زمان‌بند نصب نیست — گزینه ۱۰ آن را روشن می‌کند'
+  'not in this lease yet - refresh the licence (item 7)' = 'در این نسخه از لایسنس نیست — آن را به‌روزرسانی کنید (گزینه ۷)'
+  'nothing to do - the Expert and the dashboard are ready' = 'کاری لازم نیست — اکسپرت و داشبورد آماده‌اند'
+  'activate the Expert first - item 4 asks for the serial' = 'ابتدا اکسپرت را فعال کنید — گزینه ۴ سریال را می‌پرسد'
+  'the licence has expired - it still works for a few days, renew it now' = 'لایسنس منقضی شده — چند روز مهلت دارد، همین حالا تمدید کنید'
+  'the licence is not active - refresh it (item 7), then contact support if it stays red' = 'لایسنس فعال نیست — گزینه ۷ را بزنید و اگر قرمز ماند با پشتیبانی تماس بگیرید'
+  'register the MetaTrader folder (item 6) or the Expert reads no licence' = 'پوشه متاتریدر را ثبت کنید (گزینه ۶) وگرنه اکسپرت لایسنس نمی‌بیند'
+  'build the dashboard login from the same serial (item 1)' = 'ورود داشبورد را از همان سریال بسازید (گزینه ۱)'
+  'the dashboard login is not built yet - item 1 builds it from your Expert licence.' = 'ورود داشبورد هنوز ساخته نشده — گزینه ۱ آن را از لایسنس اکسپرت می‌سازد.'
+  'the dashboard will not start until item 1 rebuilds this login.' = 'داشبورد تا زمانی که گزینه ۱ این ورود را نسازد اجرا نمی‌شود.'
+  'install or update it from the main menu, item 4.' = 'آن را از منوی اصلی، گزینه ۴ نصب یا به‌روزرسانی کنید.'
+  'no licence on this machine yet - item 4 activates one.' = 'هنوز لایسنسی روی این رایانه نیست — گزینه ۴ آن را فعال می‌کند.'
+  'the serial from the shop is the only thing you need.' = 'تنها چیزی که لازم دارید همان سریال فروشگاه است.'
+  'the MetaTrader folder is registered - the Expert can read the licence now.' = 'پوشه متاتریدر ثبت شد — اکسپرت اکنون لایسنس را می‌بیند.'
+  'the MetaTrader folder was not registered - the Expert reads no licence without it.' = 'پوشه متاتریدر ثبت نشد — بدون آن اکسپرت لایسنس نمی‌بیند.'
+  'item 6 asks again; the folder ends in \MQL5.' = 'گزینه ۶ دوباره می‌پرسد؛ نام پوشه با \MQL5 تمام می‌شود.'
+  'step 1 of 2: tell the Agent where MetaTrader keeps its files.' = 'گام ۱ از ۲: محل فایل‌های متاتریدر را به ایجنت بگویید.'
+  'step 2 of 2: paste the serial exactly as the shop sent it.' = 'گام ۲ از ۲: سریال را دقیقاً همان‌طور که فروشگاه فرستاده بچسبانید.'
+  'no serial was entered - nothing was changed.' = 'سریالی وارد نشد — هیچ چیز تغییر نکرد.'
+  'the serial was accepted - the Expert is active on this machine.' = 'سریال پذیرفته شد — اکسپرت روی این رایانه فعال است.'
+  'that serial is not valid - check for a typo in what you pasted.' = 'این سریال معتبر نیست — با دقت بررسی کنید درست چسبانده اید.'
+  'this machine could not be identified - send the device identity (item 9) to support.' = 'این رایانه شناسایی نشد — شناسه دستگاه (گزینه ۹) را برای پشتیبانی بفرستید.'
+  'the server refused the activation - the reason is printed above.' = 'سرور فعال‌سازی را رد کرد — دلیل در بالای صفحه نوشته شده است.'
+  'this licence is revoked or suspended - contact support.' = 'این لایسنس باطل یا معلق شده — با پشتیبانی تماس بگیرید.'
+  'next, in MetaTrader 5:'         = 'مرحله بعد، در متاتریدر ۵:'
+  '  1  open the chart you trade on' = '  ۱  چارتی که می‌خواهید معامله کنید را باز کنید'
+  '  2  attach Mapsim_Assistance_Bot and allow DLL imports' = '  ۲  اکسپرت Mapsim_Assistance_Bot را روی چارت بیندازید و اجازه DLL بدهید'
+  'the dashboard login was rebuilt from the same serial - nothing extra to buy.' = 'ورود داشبورد از همان سریال بازسازی شد — چیز اضافه‌ای لازم نیست.'
+  'the dashboard login was renewed with it.' = 'ورود داشبورد هم همراهش تمدید شد.'
+  'the Expert keeps working while the current lease lasts.' = 'تا پایان مهلت فعلی، اکسپرت به کار خود ادامه می‌دهد.'
+  'the licence on this machine is valid - no internet needed.' = 'لایسنس روی این رایانه معتبر است — به اینترنت نیاز نیست.'
+  'the licence on this machine is not valid - the reason is printed above.' = 'لایسنس روی این رایانه معتبر نیست — دلیل در بالای صفحه نوشته شده است.'
+  'refresh it (item 7); if it stays red, send item 9 to support.' = 'گزینه ۷ را بزنید؛ اگر باز قرمز ماند گزینه ۹ را برای پشتیبانی بفرستید.'
+  'cancelled - the licence was not touched.' = 'لغو شد — به لایسنس دست زده نشد.'
+  'the serial is not lost: item 4 activates it again on this machine.' = 'سریال از بین نرفته: گزینه ۴ دوباره آن را روی این رایانه فعال می‌کند.'
 }
 
 # Each rule matches the trimmed line and receives {0}, {1} ... for its groups.
@@ -482,6 +571,20 @@ $script:FaRules = @(
   @{ p = '^activation failed \(code (\d+)\)\.$'; r = 'فعال‌سازی ناموفق (کد {0}).' }
   @{ p = '^refresh failed \(code (\d+)\)\.$'; r = 'به‌روزرسانی ناموفق (کد {0}).' }
   @{ p = '^error: the licence Agent could not be installed - (.+)$'; r = 'خطا: Agent لایسنس نصب نشد — {0}' }
+
+  @{ p = '^\[ OK \] (.+)$'; r = '[ موفق ] {0}' }
+  @{ p = '^\[WARN\] (.+)$'; r = '[ هشدار ] {0}' }
+  @{ p = '^\[FAIL\] (.+)$'; r = '[ خطا ] {0}' }
+  @{ p = '^(.+) - grace period, renew now$'; r = '{0} — مهلت پایان، همین حالا تمدید کنید' }
+  @{ p = '^linked: (\d+) MetaTrader folder\(s\)$'; r = 'متصل: {0} پوشه متاتریدر' }
+  @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC$'; r = '{0} به وقت جهانی' }
+  @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC - expired$'; r = '{0} به وقت جهانی — منقضی' }
+  @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC\s+\((\d+) day\(s\) left\)$'; r = '{0} به وقت جهانی ({1} روز باقی‌مانده)' }
+  @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC \((\d+) day\(s\)\)$'; r = '{0} به وقت جهانی ({1} روز)' }
+  @{ p = '^(\d+) of 8 - no automatic entry$'; r = '{0} از ۸ — بدون ورود خودکار' }
+  @{ p = '^(\d+) of 8$'; r = '{0} از ۸' }
+  @{ p = '^License valid for (\d+) day\(s\)\.$'; r = 'لایسنس تا {0} روز دیگر معتبر است.' }
+  @{ p = '^valid until (.+)\.$'; r = 'معتبر تا {0}.' }
 
   # --- numbers ------------------------------------------------------------
   @{ p = '^(\S+)\s+([\d.,]+) GB free of\s+([\d.,]+) GB\s+\((\d+)% used\)\s*(.*)$'; r = '{0}   {1} گیگابایت آزاد از {2} گیگابایت ({3}٪ مصرف)   {4}' }
@@ -815,21 +918,51 @@ function Enter-License {
 
 function Show-LicenseStatus {
   if (-not (Test-LicenseSupported)) {
-    Write-Host 'the installed dashboard build does not support the license yet.'
-    Write-Host 'update it from menu 4 (Install / update dashboard).'
+    Write-Host ''
+    Write-Tag 'WARN' 'the installed dashboard build does not support the license yet.'
+    Write-Hint 'install or update it from the main menu, item 4.'
+    Write-Host ''
     return
   }
   if (-not (Test-LicenseSaved)) {
-    Write-Host 'dashboard login : not prepared - item 1 builds it from your Expert licence'
+    Write-Host ''
+    Write-Tag 'WARN' 'the dashboard login is not built yet - item 1 builds it from your Expert licence.'
+    Write-Host ''
     return
   }
-  Write-Host 'dashboard login files:'
-  Write-Host "  $LicenseFile"
-  Write-Host "  $LicenseAuthFile"
+  # The dashboard half is checked by its own program, not by the Agent, and it
+  # answers in the same card as the rest of the licence screen: one verdict tag
+  # at the top, the dates below it, the files last.
   $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
-  Show-LicenseResult $text
-  if ((Get-LicenseField $text 'status') -eq 'ACTIVE') { Write-Host 'dashboard login : ACTIVE' }
-  else { Write-Host 'dashboard login : NOT ACTIVE - the dashboard will not start (item 1 rebuilds it)' }
+  $state = Get-LicenseField $text 'status'
+  $user = Get-LicenseField $text 'user'
+  $account = Get-LicenseField $text 'account'
+  $expiry = Get-LicenseField $text 'expiry'
+  $days = Get-LicenseField $text 'days_left'
+  $message = Get-LicenseField $text 'message'
+  $warning = Get-LicenseField $text 'warning'
+  $kind = 'FAIL'
+  if ($state -eq 'ACTIVE') { $kind = 'OK' }
+  elseif ($state -eq 'GRACE') { $kind = 'WARN' }
+  if (-not $state) { $state = 'unknown' }
+
+  Write-Host ''
+  Ui-Top
+  Ui-Status 'Dashboard' $kind $state
+  if ($user) { Ui-Row 'Login' $user ($Cyan + $user + $NoColor) }
+  if ($account) { Ui-Row 'Account' $account ($Cyan + $account + $NoColor) }
+  if ($expiry) {
+    $endPlain = $expiry
+    if ($days -match '^\d+$') { $endPlain = "$expiry  ($days day(s) left)" }
+    Ui-Row 'Valid to' $endPlain ($(if ($kind -eq 'OK') { $Green } else { $Yellow }) + $endPlain + $NoColor)
+  }
+  Ui-Row 'Files' 'saved' ($Cyan + 'saved' + $NoColor)
+  Ui-Bottom
+  Write-Host "    $LicenseFile" -ForegroundColor DarkGray
+  Write-Host "    $LicenseAuthFile" -ForegroundColor DarkGray
+  if ($message) { Write-Tag $kind $message }
+  if ($warning) { Write-Tag 'WARN' $warning }
+  Write-Host ''
 }
 
 function Remove-License {
@@ -847,48 +980,122 @@ function Show-LicenseMenu {
   while ($true) {
     Clear-Host
     Show-Title
-    Write-Host 'License'
-    Write-Host '  one serial for both halves: the Expert and the dashboard'
-    if (Test-LicenseSaved) { Write-Host "  dashboard login: ready ($LicenseFile)" } else { Write-Host '  dashboard login: not built yet' }
-    Write-Host ('  Expert licence : ' + (Get-AgentSummary))
-    Write-Host ''
-    Write-Host '  Dashboard login (built from your Expert licence - nothing extra to buy)'
-    Write-Host '  1) Build / refresh the dashboard login now'
-    Write-Host '  2) Show the dashboard login status'
-    Write-Host '  3) Remove the saved dashboard login'
-    Write-Host ''
-    Write-Host '  Expert licence (the serial from the shop)'
-    Write-Host '  4) Activate the Expert with a serial'
-    Write-Host '  5) Show the Expert licence status'
-    Write-Host '  6) Register the MetaTrader folder (MQL5)'
-    Write-Host '  7) Refresh the Expert licence now'
-    Write-Host '  8) Verify the licence locally'
-    Write-Host '  9) Device identity (for support)'
-    Write-Host ' 10) Automatic refresh on / off'
-    Write-Host ' 11) Remove the licence from this machine'
-    Write-Host ''
-    Write-Host ' 12) Enter an old dashboard licence (only if support sent one)'
-    Write-Host ''
-    Write-Host '  0) Back to the main menu'
-    $c = Read-Host "`nchoose 0-12 (0 = back)"
+
+    $fields = Get-AgentFields
+    $state = [string]$fields['status']
+    $saved = Test-LicenseSaved
+    $folders = Get-AgentTerminalCount
+    $hourly = Test-AgentSchedule
+
+    # The Expert half in one line a customer can read. The status word comes
+    # from the Agent and is never translated as free text: ACTIVE / GRACE are
+    # the two that mean "the Expert will trade".
+    if (-not (Test-Path $AgentLeaseFile)) {
+      $expKind = 'WARN'; $expText = 'not activated'
+    } elseif ($state -eq 'ACTIVE') {
+      $expKind = 'OK'; $expText = Get-AgentSummary
+    } elseif ($state -eq 'GRACE') {
+      $expKind = 'WARN'; $expText = (Get-AgentSummary) + ' - grace period, renew now'
+    } else {
+      $expKind = 'FAIL'; $expText = Get-AgentSummary
+    }
+
+    # The date the customer paid for. A lease signed by a server older than
+    # licence platform v1.6.2 carries no end date; saying so beats printing the
+    # 72 h lease as if it were the licence, which is what showed "2 days" for a
+    # licence with a month left.
+    $licUtc = [string]$fields['license_expiry_utc']
+    if (-not $licUtc -or $licUtc -eq '-') {
+      $endKind = 'WARN'; $endText = 'not in this lease yet - refresh the licence (item 7)'
+    } elseif ($state -eq 'ACTIVE') {
+      $endKind = 'OK'; $endText = "$licUtc UTC"
+    } else {
+      $endKind = 'WARN'; $endText = "$licUtc UTC - expired"
+    }
+
+    if ($saved) { $dashKind = 'OK'; $dashText = 'ready - built from the Expert licence' }
+    else { $dashKind = 'WARN'; $dashText = 'not built yet - item 1 or it builds itself on start' }
+
+    if ($folders -gt 0) { $termKind = 'OK'; $termText = "linked: $folders MetaTrader folder(s)" }
+    else { $termKind = 'WARN'; $termText = 'not registered - the Expert cannot read the licence' }
+
+    if ($hourly) { $autoKind = 'OK'; $autoText = 'hourly task installed' }
+    else { $autoKind = 'WARN'; $autoText = 'not scheduled - item 10 turns it on' }
+
+    $next = Get-LicenceNextStep $state $saved $folders
+
+    Ui-Top
+    Ui-Status 'Licence' $expKind $expText
+    Ui-Status 'Valid to' $endKind $endText
+    Ui-Status 'Dashboard' $dashKind $dashText
+    Ui-Status 'Terminal' $termKind $termText
+    Ui-Status 'Refresh' $autoKind $autoText
+    Ui-Sep
+    Ui-Status 'Next step' $next.Kind $next.Text
+    Ui-Sep
+    Ui-Head 'Dashboard login - same serial, nothing extra to buy'
+    Ui-Item '1' 'Build / refresh the dashboard login now'
+    Ui-Item '2' 'Show the dashboard login status'
+    Ui-Item '3' 'Remove the saved dashboard login'
+    Ui-Head 'Expert licence - the serial from the shop'
+    Ui-Item '4' 'Activate the Expert with a serial'
+    Ui-Item '5' 'Show the Expert licence in detail'
+    Ui-Item '6' 'Register the MetaTrader folder (MQL5)'
+    Ui-Item '7' 'Refresh the Expert licence now'
+    Ui-Item '8' 'Verify the licence locally (no internet)'
+    Ui-Head 'Support'
+    Ui-Item '9' 'Device identity (send this to support)'
+    Ui-Item '10' 'Automatic refresh on / off'
+    Ui-Item '11' 'Remove the licence from this machine'
+    Ui-Item '12' 'Enter an old dashboard licence (only if support sent one)'
+    Ui-Sep
+    Ui-Item '0' 'Back to the main menu'
+    Ui-Bottom
+
+    $c = Read-Host "`nEnter Number Of List"
     switch ($c) {
       '0' { return }
-      '1' { if (Sync-DashboardLogin) { Write-Host 'the dashboard login is ready - start the dashboard from the main menu (2).' } }
+      '1' {
+        if (Sync-DashboardLogin) {
+          Write-Tag 'OK' 'the dashboard login is ready - start the dashboard from the main menu (2).'
+        } else { Write-Tag 'FAIL' $script:DashboardLoginNote }
+      }
       '2' { Show-LicenseStatus }
       '3' { Remove-License }
       '4' { Activate-Agent }
       '5' { Show-AgentStatus }
-      '6' { Register-AgentTerminal '' | Out-Null }
+      '6' { $null = Register-AgentTerminal '' }
       '7' { Update-AgentLease }
       '8' { Test-AgentLease }
       '9' { Show-AgentDevice }
       '10' { Toggle-AgentSchedule }
       '11' { Remove-AgentLease }
-      '12' { Enter-License | Out-Null }
+      '12' { $null = Enter-License }
       default { Write-Host 'please choose 0-12.' }
     }
     $null = Read-Host "`nPress Enter to continue"
   }
+}
+
+# What the customer should do next, worked out from the same five facts the
+# screen above prints, so the recommendation and the rows can never disagree.
+function Get-LicenceNextStep([string]$State, [bool]$Saved, [int]$Folders) {
+  if (-not (Test-Path $AgentLeaseFile)) {
+    return @{ Kind = 'WARN'; Text = 'activate the Expert first - item 4 asks for the serial' }
+  }
+  if ($State -eq 'GRACE') {
+    return @{ Kind = 'WARN'; Text = 'the licence has expired - it still works for a few days, renew it now' }
+  }
+  if ($State -ne 'ACTIVE') {
+    return @{ Kind = 'FAIL'; Text = 'the licence is not active - refresh it (item 7), then contact support if it stays red' }
+  }
+  if ($Folders -le 0) {
+    return @{ Kind = 'WARN'; Text = 'register the MetaTrader folder (item 6) or the Expert reads no licence' }
+  }
+  if (-not $Saved) {
+    return @{ Kind = 'WARN'; Text = 'build the dashboard login from the same serial (item 1)' }
+  }
+  return @{ Kind = 'OK'; Text = 'nothing to do - the Expert and the dashboard are ready' }
 }
 
 # ---------------------------------------------------------------- licence agent
@@ -997,31 +1204,72 @@ function Invoke-Agent([string[]]$Arguments) {
     if ($line -ne '') { Write-Host $line }
   }
   $script:AgentSummary = $null
+  $script:AgentFields = $null
   return $code
 }
 
-# One line for the submenu and the main frame. `status` is local (no network),
-# but starting the interpreter is the slow part, so the answer is cached until
-# an action changes it.
+# The Agent answers `status` with one key=value pair per line. The licence
+# screen reads eight of them and every call costs a Python start, so the whole
+# answer is parsed once and cached; Invoke-Agent clears it after an action.
+function Get-AgentFields {
+  if ($script:AgentFields) { return $script:AgentFields }
+  $fields = @{}
+  if (Test-Path $AgentLeaseFile) {
+    $launcher = Get-AgentLauncher -Quiet
+    if ($launcher) {
+      $all = @($launcher.Args) + @('status')
+      $previous = $ErrorActionPreference
+      # A rejected lease makes the Agent exit non-zero with the reason on
+      # stderr. That answer is data here, not a reason to abort the menu.
+      $ErrorActionPreference = 'Continue'
+      try { $text = (& $launcher.File @all 2>&1 | Out-String) } finally { $ErrorActionPreference = $previous }
+      foreach ($line in ($text -split "`r?`n")) {
+        $at = $line.IndexOf('=')
+        if ($at -gt 0) { $fields[$line.Substring(0, $at).Trim()] = $line.Substring($at + 1).Trim() }
+      }
+    }
+  }
+  $script:AgentFields = $fields
+  return $fields
+}
+
+# The folder(s) the Agent copies the lease into. The count is what tells a
+# customer whether the Expert can see the licence at all.
+function Get-AgentTerminalCount {
+  if (-not (Test-Path $AgentMql5File)) { return 0 }
+  $lines = @(Get-Content -Path $AgentMql5File -ErrorAction SilentlyContinue | Where-Object { $_ -and $_.Trim() -ne '' })
+  return $lines.Count
+}
+
+function Test-AgentSchedule {
+  # `schtasks` prints "ERROR: The system cannot find the file specified" on a
+  # machine without the task, and that banner used to land in the middle of the
+  # licence screen as if the menu had broken. Both streams are swallowed here;
+  # the exit code is the whole answer.
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & schtasks.exe /Query /TN $AgentTaskName *> $null } finally { $ErrorActionPreference = $previous }
+  return ($LASTEXITCODE -eq 0)
+}
+
+# One line for the submenu and the main frame, built from the same parse.
 function Get-AgentSummary {
   if ($script:AgentSummary) { return $script:AgentSummary }
   if (-not (Test-Path $AgentLeaseFile)) {
     $script:AgentSummary = 'not activated'
     return $script:AgentSummary
   }
-  $launcher = Get-AgentLauncher -Quiet
-  if (-not $launcher) {
+  $fields = Get-AgentFields
+  $state = [string]$fields['status']
+  if (-not $state) {
     $script:AgentSummary = 'not readable - the Agent is missing'
     return $script:AgentSummary
   }
-  $all = @($launcher.Args) + @('status')
-  $text = (& $launcher.File @all 2>&1 | Out-String)
-  $state = Get-LicenseField $text 'status'
-  $product = Get-LicenseField $text 'product'
-  $days = Get-LicenseField $text 'days_left'
-  if (-not $state) { $state = 'unknown' }
   $summary = $state
+  $product = [string]$fields['product']
   if ($product) { $summary = "$summary ($product)" }
+  # `days_left` is the licence now, not the 72 h lease (Agent 2.2.0).
+  $days = [string]$fields['days_left']
   if ($days -match '^\d+$') { $summary = "$summary, $days day(s) left" }
   $script:AgentSummary = $summary
   return $summary
@@ -1054,6 +1302,7 @@ function Invoke-AgentQuiet([string[]]$Arguments) {
     $ErrorActionPreference = $previous
   }
   $script:AgentSummary = $null
+  $script:AgentFields = $null
   return $text
 }
 
@@ -1157,20 +1406,80 @@ function Sync-DashboardLogin([switch]$Quiet) {
     return $false
   }
   if (-not $Quiet) {
-    Write-Host 'the dashboard login was prepared from your Expert licence:'
-    Write-Host "  login    : $($material.User)"
-    Write-Host "  password : $($material.Password)"
-    Write-Host "  account  : $($material.Account)"
-    Write-Host "  valid to : $($material.Expiry)"
-    Write-Host '  it renews itself whenever the Expert licence is refreshed.'
+    Write-Tag 'OK' 'the dashboard login was prepared from your Expert licence:'
+    Ui-Top
+    Ui-Row 'Login' ([string]$material.User) ($Cyan + [string]$material.User + $NoColor)
+    Ui-Row 'Password' ([string]$material.Password) ($Cyan + [string]$material.Password + $NoColor)
+    Ui-Row 'Account' ([string]$material.Account) ($Cyan + [string]$material.Account + $NoColor)
+    Ui-Row 'Valid to' ([string]$material.Expiry) ($Green + [string]$material.Expiry + $NoColor)
+    Ui-Bottom
+    Write-Hint 'it renews itself whenever the Expert licence is refreshed.'
   }
   return $true
 }
 
 function Show-AgentStatus {
   if (-not (Install-Agent)) { return }
+  if (-not (Test-Path $AgentLeaseFile)) {
+    Write-Host ''
+    Write-Tag 'WARN' 'no licence on this machine yet - item 4 activates one.'
+    Write-Hint 'the serial from the shop is the only thing you need.'
+    Write-Host ''
+    return
+  }
+  # This screen used to dump the Agent's raw key=value lines. Every field has a
+  # label, a colour and a sentence now, because `days_source=lease` answers
+  # nothing for a customer.
+  $fields = Get-AgentFields
+  $state = [string]$fields['status']
+  $kind = 'FAIL'
+  if ($state -eq 'ACTIVE') { $kind = 'OK' }
+  elseif ($state -eq 'GRACE') { $kind = 'WARN' }
+  if (-not $state) { $state = 'unknown' }
+
+  $product = [string]$fields['product']
+  if (-not $product) { $product = '-' }
+  $licUtc = [string]$fields['license_expiry_utc']
+  $licDays = [string]$fields['days_left']
+  $leaseUtc = [string]$fields['lease_expiry_utc']
+  $leaseDays = [string]$fields['lease_days']
+  $graceUtc = [string]$fields['grace_until_utc']
+  $agent = [string]$fields['agent']
+  $device = [string]$fields['device']
+  if (-not $device) { $device = '-' }
+  $rights = @(([string]$fields['entitlements']) -split ',' | Where-Object { $_ -ne '' })
+  $entry = @($rights | Where-Object { $_ -like 'ENTRY_*' }).Count
+  $rightsText = "$($rights.Count) of 8"
+  if ($entry -eq 0) { $rightsText = "$rightsText - no automatic entry" }
+
+  $note = [string]$fields['warning']
+
   Write-Host ''
-  $null = Invoke-Agent @('status')
+  Ui-Top
+  Ui-Status 'Result' $kind $state
+  Ui-Row 'Product' $product ($Cyan + $product + $NoColor)
+  if ($licUtc -and $licUtc -ne '-') {
+    $endPlain = "$licUtc UTC"
+    if ($licDays -match '^\d+$') { $endPlain = "$endPlain  ($licDays day(s) left)" }
+    Ui-Row 'Valid to' $endPlain ($(if ($kind -eq 'OK') { $Green } else { $Yellow }) + $endPlain + $NoColor)
+  } else {
+    Ui-Status 'Valid to' 'WARN' 'not in this lease yet - refresh the licence (item 7)'
+  }
+  if ($graceUtc -and $graceUtc -ne '-' -and $kind -ne 'OK') {
+    Ui-Row 'Grace to' "$graceUtc UTC" ($Yellow + "$graceUtc UTC" + $NoColor)
+  }
+  # The lease is the renewal ticket, not the licence: it is printed small and
+  # last, so nobody reads "2 days" as the end of what they paid for.
+  if ($leaseUtc -and $leaseUtc -ne '-') {
+    $leasePlain = "$leaseUtc UTC auto-renews"
+    if ($leaseDays -match '^\d+$') { $leasePlain = "$leaseUtc UTC ($leaseDays day(s))" }
+    Ui-Row 'Lease' $leasePlain ($(if ($leaseDays -eq '0') { $Yellow } else { $Green }) + $leasePlain + $NoColor)
+  }
+  Ui-Row 'Rights' $rightsText ($Cyan + $rightsText + $NoColor)
+  Ui-Row 'Agent' $agent ($Cyan + $agent + $NoColor)
+  Ui-Row 'Device' $device ($Cyan + $device + $NoColor)
+  if ($note) { Ui-Status 'Note' 'WARN' $note }
+  Ui-Bottom
   Write-Host ''
 }
 
@@ -1184,9 +1493,11 @@ function Register-AgentTerminal([string]$Target) {
   if ($Target) { $call += @('--path', $Target) }
   $code = Invoke-Agent $call
   if ($code -ne 0) {
-    Write-Host 'the MetaTrader folder was not registered - without it the EA cannot see the licence.' -ForegroundColor Yellow
+    Write-Tag 'WARN' 'the MetaTrader folder was not registered - the Expert reads no licence without it.'
+    Write-Hint "item 6 asks again; the folder ends in \MQL5."
     return $false
   }
+  Write-Tag 'OK' 'the MetaTrader folder is registered - the Expert can read the licence now.'
   return $true
 }
 
@@ -1195,31 +1506,41 @@ function Activate-Agent {
   if (-not (Test-Path $AgentLeaseFile)) {
     # Order matters the first time: a lease with no terminal path is a licence
     # the EA cannot see.
+    Write-Host ''
+    Write-Hint 'step 1 of 2: tell the Agent where MetaTrader keeps its files.'
     if (-not (Register-AgentTerminal '')) {
       $a = Read-Default 'continue with the activation anyway? (y/n)' 'n'
       if ($a -ne 'y') { return }
     }
   }
+  Write-Host ''
+  Write-Hint 'step 2 of 2: paste the serial exactly as the shop sent it.'
   $serial = Read-Host 'licence serial (MAPSIM-XXXX-XXXX-XXXX-XXXX)'
-  if (-not $serial) { Write-Host 'no serial was entered.'; return }
+  if (-not $serial) { Write-Tag 'WARN' 'no serial was entered - nothing was changed.'; return }
   # No --product: the serial decides which product was bought (D-68), so this
   # one menu activates the assistant and the full licence alike.
   $code = Invoke-Agent @('activate', '--serial', $serial)
   switch ($code) {
-    0  { Write-Host 'activated.' }
-    10 { Write-Host 'that serial is not valid.' }
-    11 { Write-Host 'this serial was already used - ask support to move it to this machine.' }
-    12 { Write-Host 'this machine could not be identified - send the device identity to support.' }
-    13 { Write-Host 'the licence server could not be reached - check the internet and try again.' }
-    14 { Write-Host 'the server refused the activation - read the message above.' }
-    15 { Write-Host 'this licence is revoked or suspended.' }
-    16 { Write-Host 'this licence belongs to another machine - ask support to move it.' }
-    default { Write-Host "activation failed (code $code)." }
+    0  { Write-Tag 'OK' 'the serial was accepted - the Expert is active on this machine.' }
+    10 { Write-Tag 'FAIL' 'that serial is not valid - check for a typo in what you pasted.' }
+    11 { Write-Tag 'FAIL' 'this serial was already used - ask support to move it to this machine.' }
+    12 { Write-Tag 'FAIL' 'this machine could not be identified - send the device identity (item 9) to support.' }
+    13 { Write-Tag 'FAIL' 'the licence server could not be reached - check the internet and try again.' }
+    14 { Write-Tag 'FAIL' 'the server refused the activation - the reason is printed above.' }
+    15 { Write-Tag 'FAIL' 'this licence is revoked or suspended - contact support.' }
+    16 { Write-Tag 'FAIL' 'this licence belongs to another machine - ask support to move it.' }
+    default { Write-Tag 'FAIL' "activation failed (code $code)." }
   }
   if ($code -eq 0) {
-    Write-Host 'in MetaTrader 5: attach the Expert to a chart and allow DLL imports.'
+    Write-Host ''
+    Write-Hint 'next, in MetaTrader 5:'
+    Write-Hint '  1  open the chart you trade on'
+    Write-Hint '  2  attach Mapsim_Assistance_Bot and allow DLL imports'
     # The same serial now covers the dashboard: prepare its login right away.
     $null = Sync-DashboardLogin -Quiet
+    if (Test-LicenseSaved) {
+      Write-Hint 'the dashboard login was rebuilt from the same serial - nothing extra to buy.'
+    }
   }
 }
 
@@ -1228,22 +1549,30 @@ function Update-AgentLease {
   $code = Invoke-Agent @('refresh', '--force')
   switch ($code) {
     0  {
-      Write-Host 'the licence was refreshed.'
+      Write-Tag 'OK' 'the licence was refreshed.'
+      $fields = Get-AgentFields
+      $licUtc = [string]$fields['license_expiry_utc']
+      if ($licUtc -and $licUtc -ne '-') { Write-Hint "valid until $licUtc UTC." }
       # Renewal must reach the dashboard too, or it would expire before the EA.
       $null = Sync-DashboardLogin -Quiet
+      if (Test-LicenseSaved) { Write-Hint 'the dashboard login was renewed with it.' }
     }
-    13 { Write-Host 'the licence server could not be reached - check the internet.' }
-    15 { Write-Host 'this licence is revoked or suspended.' }
-    16 { Write-Host 'this licence belongs to another machine.' }
-    default { Write-Host "refresh failed (code $code)." }
+    13 { Write-Tag 'FAIL' 'the licence server could not be reached - check the internet.'
+         Write-Hint 'the Expert keeps working while the current lease lasts.' }
+    15 { Write-Tag 'FAIL' 'this licence is revoked or suspended - contact support.' }
+    16 { Write-Tag 'FAIL' 'this licence belongs to another machine - ask support to move it.' }
+    default { Write-Tag 'FAIL' "refresh failed (code $code)." }
   }
 }
 
 function Test-AgentLease {
   if (-not (Install-Agent)) { return }
   $code = Invoke-Agent @('verify')
-  if ($code -eq 0) { Write-Host 'the local licence is valid.' }
-  else { Write-Host 'the local licence is not valid - see the code above.' -ForegroundColor Yellow }
+  if ($code -eq 0) { Write-Tag 'OK' 'the licence on this machine is valid - no internet needed.' }
+  else {
+    Write-Tag 'FAIL' 'the licence on this machine is not valid - the reason is printed above.'
+    Write-Hint 'refresh it (item 7); if it stays red, send item 9 to support.'
+  }
 }
 
 function Show-AgentDevice {
@@ -1269,11 +1598,12 @@ function Toggle-AgentSchedule {
 }
 
 function Remove-AgentLease {
-  if (-not (Test-Path $AgentLeaseFile)) { Write-Host 'this machine has no licence to remove.'; return }
+  if (-not (Test-Path $AgentLeaseFile)) { Write-Tag 'WARN' 'this machine has no licence to remove.'; return }
   $a = Read-Default 'remove the licence from this machine? the Expert stops trading (y/n)' 'n'
-  if ($a -ne 'y') { Write-Host 'cancelled.'; return }
+  if ($a -ne 'y') { Write-Tag 'WARN' 'cancelled - the licence was not touched.'; return }
   $null = Invoke-Agent @('uninstall')
-  Write-Host 'the licence was removed from this machine.'
+  Write-Tag 'OK' 'the licence was removed from this machine.'
+  Write-Hint 'the serial is not lost: item 4 activates it again on this machine.'
 }
 
 # Uninstall-Everything calls this: a removed dashboard must not leave a licence
@@ -1954,10 +2284,72 @@ function Ui-Item([string]$Num, [string]$Text) {
   if (Test-PlainUi) {
     $shown = '{0,2}' -f $Num
     if ($script:MapsimLang -eq 'fa') { $shown = ConvertTo-FaDigits $shown }
+    # A number written in front of a Persian sentence is laid out at the far left
+    # of a line that is otherwise right aligned, so the row starts visually with
+    # its number and ends with its text - the wrong end for a Persian reader.
+    # Last in the line puts it back on the right, which is where a Persian list
+    # keeps the number it is asking you to type.
+    if ($script:GuiHost -and $script:MapsimLang -eq 'fa') {
+      Write-Host ('   ' + $White + $faText + $NoColor + '   ' + $Magenta + '(' + $shown.Trim() + ')' + $NoColor)
+      return
+    }
     Write-Host ('   ' + $Magenta + $shown + $NoColor + ' - ' + $White + $faText + $NoColor)
     return
   }
   Write-Host ($Cyan + $BoxV + $NoColor + '   ' + $Magenta + ('{0,2}' -f $Num) + $NoColor + ' - ' + $White + ('{0,-71}' -f $Text) + $NoColor + $Cyan + $BoxV + $NoColor)
+}
+
+# A group title inside the frame. Without it a flat list of twelve numbered
+# lines is a wall: the licence screen prints three of these so the customer can
+# see which block answers which question.
+function Ui-Head([string]$Text) {
+  $faText = Find-FaText $Text
+  if (Test-PlainUi) { Write-Host ('  ' + $Yellow + $faText + $NoColor); return }
+  $pad = 79 - 3 - $Text.Length
+  if ($pad -lt 0) { $pad = 0 }
+  Write-Host ($Cyan + $BoxV + $NoColor + '  ' + $Yellow + $Text + $NoColor + (' ' * $pad) + $Cyan + $BoxV + $NoColor)
+}
+
+# ---------------------------------------------------------------- status tags
+# A customer must see at a glance whether something is fine, needs attention or
+# is broken, so every verdict is printed through these three tags and never as
+# plain prose in a grey wall of text. The tag is coloured and the rest of the
+# line carries the same tint, which is also what the window host can paint (it
+# maps 31/32/33 to red/amber/green and ignores nothing).
+function Get-TagText([string]$Kind) {
+  switch ($Kind) {
+    'OK'   { return '[ OK ]' }
+    'WARN' { return '[WARN]' }
+    'FAIL' { return '[FAIL]' }
+  }
+  return '[INFO]'
+}
+
+function Get-TagColor([string]$Kind) {
+  switch ($Kind) {
+    'OK'   { return $Green }
+    'WARN' { return $Yellow }
+    'FAIL' { return $Red }
+  }
+  return $Cyan
+}
+
+# A frame row whose value is a verdict: "Expert licence  [ OK ] active ...".
+function Ui-Status([string]$Label, [string]$Kind, [string]$Text) {
+  $plain = (Get-TagText $Kind) + ' ' + $Text
+  Ui-Row $Label $plain ((Get-TagColor $Kind) + $plain + $NoColor)
+}
+
+# The same tag for a line outside the frame: the text is translated first and
+# coloured afterwards, so the dictionary still matches the bare sentence.
+function Write-Tag([string]$Kind, [string]$Text) {
+  $tag = Find-FaText (Get-TagText $Kind)
+  Write-Host ('  ' + (Get-TagColor $Kind) + $tag + $NoColor + ' ' + (Find-FaText $Text))
+}
+
+# A quiet line under a result: what to do next, or why nothing was changed.
+function Write-Hint([string]$Text) {
+  Write-Host ('  ' + (Find-FaText $Text)) -ForegroundColor DarkGray
 }
 
 function Choose-Port {
@@ -2582,6 +2974,13 @@ function Clear-GuiScreen {
   try { $script:GuiLog.Clear(); $script:GuiPending = '' } catch { }
 }
 
+# A RichEdit takes the paragraph direction from the paragraph format and offers
+# no public API for it: the only lever is EM_SETPARAFORMAT, which on this engine
+# rewrites the first paragraph of a page and leaves the rest as they were, so it
+# cannot turn a whole screen around. The menu keeps the plain layout in Persian
+# (no padded columns, no box) and hands the direction to the control's own
+# RightToLeft setting in Set-GuiLanguage.
+
 function Write-GuiLine([string]$Text, [bool]$NoNewline, [object]$Tint) {
   if (-not $script:GuiHost -or -not $script:GuiAlive) { return }
   if ($null -eq $Text) { $Text = '' }
@@ -2762,7 +3161,16 @@ function Initialize-MapsimHost {
     [void]$grid.Controls.Add($input, 0, 0)
     [void]$grid.Controls.Add($ok, 1, 0)
     [void]$panel.Controls.Add($grid)
-    [void]$form.Controls.Add($log)
+    # A RichTextBox paints from its own edge and has no padding of its own, so a
+    # right-to-left page ran every line into the right border and clipped the
+    # last letter. A padded host gives the text the same margin in either
+    # direction, which is what the screenshots of the licence screen showed.
+    $host3 = New-Object System.Windows.Forms.Panel
+    $host3.Dock = 'Fill'
+    $host3.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#14161B')
+    $host3.Padding = New-Object System.Windows.Forms.Padding(16, 6, 16, 6)
+    [void]$host3.Controls.Add($log)
+    [void]$form.Controls.Add($host3)
     [void]$form.Controls.Add($panel)
     $form.AcceptButton = $ok
 

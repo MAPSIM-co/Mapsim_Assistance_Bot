@@ -150,6 +150,41 @@ ui_item() {
   printf '%s│%s   %s%2s%s - %s%-71s%s%s│%s\n' "$CYAN" "$NC" "$MAGENTA" "$num" "$NC" "$WHITE" "$text" "$NC" "$CYAN" "$NC"
 }
 
+# A verdict is a coloured tag and never plain prose: the Windows menu prints the
+# same three words, so a screenshot of either menu reads the same way.
+tag_text() {
+  case "$1" in
+    OK)   printf '[ OK ]' ;;
+    WARN) printf '[WARN]' ;;
+    FAIL) printf '[FAIL]' ;;
+    *)    printf '[INFO]' ;;
+  esac
+}
+
+tag_color() {
+  case "$1" in
+    OK)   printf '%s' "$GREEN" ;;
+    WARN) printf '%s' "$YELLOW" ;;
+    FAIL) printf '%s' "$RED" ;;
+    *)    printf '%s' "$CYAN" ;;
+  esac
+}
+
+# ui_status LABEL KIND TEXT - a row whose value is a verdict.
+ui_status() {
+  tag=$(tag_text "$2")
+  col=$(tag_color "$2")
+  ui_row "$1" "$tag $3" "$col$tag $3$NC"
+}
+
+# A group title inside the box, so twelve numbered lines are three blocks and
+# not one wall.
+ui_head() {
+  pad=$((79 - 3 - ${#1}))
+  [ "$pad" -lt 0 ] && pad=0
+  printf '%s│%s  %s%s%*s%s│%s\n' "$CYAN" "$NC" "$YELLOW" "$1" "$pad" '' "$NC" "$CYAN" "$NC"
+}
+
 show_title() {
   printf '\n%b\n' "${MAGENTA}    ██   ██  █████  ██████   ██████ ███████ ██   ██   █████   █████  ███████${NC}"
   printf '%b\n'   "${MAGENTA}    ███ ███ ██   ██ ██   ██ ██      ██      ███ ███  ██   ██ ██   ██   ███  ${NC}"
@@ -1340,33 +1375,27 @@ menu_license() {
   while true; do
     if [ -t 1 ]; then clear; fi
     show_title
-    echo "License"
-    echo "  one serial for both halves: the Expert and the dashboard"
-    if license_saved; then
-      echo "  dashboard login: ready ($LICENSE_FILE)"
-    else
-      echo "  dashboard login: not built yet"
-    fi
-    echo "  Expert licence : $(agent_summary)"
-    echo ""
-    echo "  Dashboard login (built from your Expert licence - nothing extra to buy)"
-    echo "  1) Build / refresh the dashboard login now"
-    echo "  2) Show the dashboard login status"
-    echo "  3) Remove the saved dashboard login"
-    echo ""
-    echo "  Expert licence (the serial from the shop)"
-    echo "  4) Activate the Expert with a serial"
-    echo "  5) Show the Expert licence status"
-    echo "  6) Register the MetaTrader folder"
-    echo "  7) Refresh the licence now"
-    echo "  8) Verify the local licence"
-    echo "  9) Show this device's identity"
-    echo " 10) Turn automatic refresh on / off"
-    echo " 11) Remove the licence from this machine"
-    echo ""
-    echo " 12) Enter an old dashboard licence (only if support sent one)"
-    echo ""
-    echo "  0) Back to the main menu"
+    ui_top
+    license_rows
+    ui_sep
+    ui_head "Dashboard login - same serial, nothing extra to buy"
+    ui_item 1 "Build / refresh the dashboard login now"
+    ui_item 2 "Show the dashboard login status"
+    ui_item 3 "Remove the saved dashboard login"
+    ui_head "Expert licence - the serial from the shop"
+    ui_item 4 "Activate the Expert with a serial"
+    ui_item 5 "Show the Expert licence in detail"
+    ui_item 6 "Register the MetaTrader folder (MQL5)"
+    ui_item 7 "Refresh the Expert licence now"
+    ui_item 8 "Verify the licence locally (no internet)"
+    ui_head "Support"
+    ui_item 9 "Device identity (send this to support)"
+    ui_item 10 "Automatic refresh on / off"
+    ui_item 11 "Remove the licence from this machine"
+    ui_item 12 "Enter an old dashboard licence (only if support sent one)"
+    ui_sep
+    ui_item 0 "Back to the main menu"
+    ui_bottom
     printf '\n%s' "${CYAN}choose 0-12 (0 = back):${NC} "
     if ! IFS= read -r c; then
       echo ""
@@ -1391,6 +1420,84 @@ menu_license() {
     printf '%s' "${CYAN}Press Enter to continue...${NC}"
     IFS= read -r _ || { echo ""; exit 0; }
   done
+}
+
+# The five facts the licence screen is allowed to print, each with a verdict,
+# plus the one line that says what to do next. The licence end date comes from
+# the lease's lic_exp (platform 1.6.2+): before that the signed payload only
+# carried the 72 h lease, and a 30-day licence read as 2 days.
+license_rows() {
+  lstate=""
+  lproduct=""
+  ldays=""
+  lexp=""
+  lterms=""
+  if [ -f "$AGENT_LEASE" ] && agent_present; then
+    lout=$(agent_invoke status 2>&1) || true
+    lstate=$(license_field "$lout" status)
+    lproduct=$(license_field "$lout" product)
+    ldays=$(license_field "$lout" days_left)
+    lexp=$(license_field "$lout" license_expiry_utc)
+    lterms=$(license_field "$lout" terminals)
+  fi
+  case "$lterms" in ''|*[!0-9]*) lterms=0 ;; esac
+
+  if [ ! -f "$AGENT_LEASE" ]; then
+    ui_status "Licence" WARN "not activated"
+  elif [ "$lstate" = ACTIVE ] || [ "$lstate" = GRACE ]; then
+    lsum="$lstate"
+    [ -n "$lproduct" ] && lsum="$lsum ($lproduct)"
+    case "$ldays" in ''|*[!0-9]*) ;; *) lsum="$lsum, $ldays day(s) left" ;; esac
+    if [ "$lstate" = ACTIVE ]; then
+      ui_status "Licence" OK "$lsum"
+    else
+      ui_status "Licence" WARN "$lsum - grace period, renew now"
+    fi
+  else
+    [ -z "$lstate" ] && lstate=unknown
+    ui_status "Licence" FAIL "$lstate"
+  fi
+
+  if [ -z "$lexp" ] || [ "$lexp" = "-" ]; then
+    ui_status "Valid to" WARN "not in this lease yet - refresh the licence (item 7)"
+  elif [ "$lstate" = ACTIVE ]; then
+    ui_status "Valid to" OK "$lexp UTC"
+  else
+    ui_status "Valid to" WARN "$lexp UTC - expired"
+  fi
+
+  if license_saved; then
+    ui_status "Dashboard" OK "ready - built from the Expert licence"
+  else
+    ui_status "Dashboard" WARN "not built yet - item 1 or it builds itself on start"
+  fi
+
+  if [ "$lterms" -gt 0 ]; then
+    ui_status "Terminal" OK "linked: $lterms MetaTrader folder(s)"
+  else
+    ui_status "Terminal" WARN "not registered - the Expert cannot read the licence"
+  fi
+
+  if agent_timer_installed; then
+    ui_status "Refresh" OK "hourly task installed"
+  else
+    ui_status "Refresh" WARN "not scheduled - item 10 turns it on"
+  fi
+
+  ui_sep
+  if [ ! -f "$AGENT_LEASE" ]; then
+    ui_status "Next step" WARN "activate the Expert first - item 4 asks for the serial"
+  elif [ "$lstate" = GRACE ]; then
+    ui_status "Next step" WARN "the licence has expired - it still works for a few days, renew it now"
+  elif [ "$lstate" != ACTIVE ]; then
+    ui_status "Next step" FAIL "the licence is not active - refresh it (item 7), then contact support if it stays red"
+  elif [ "$lterms" -le 0 ]; then
+    ui_status "Next step" WARN "register the MetaTrader folder (item 6) or the Expert reads no licence"
+  elif ! license_saved; then
+    ui_status "Next step" WARN "build the dashboard login from the same serial (item 1)"
+  else
+    ui_status "Next step" OK "nothing to do - the Expert and the dashboard are ready"
+  fi
 }
 
 
