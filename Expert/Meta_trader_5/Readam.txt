@@ -12,7 +12,6 @@ Full walkthrough, English and Persian:
 MACos and Windows:
   Libraries/            -> MQL5/Libraries        (sqlite3.dll)
   Sounds/               -> MQL5/Files            (Mapsim_Assistance_Bot/Sounds/*.wav)
-  Include (.zip)        -> MQL5/Include
   the Expert file       -> MQL5/Experts
 
 Then restart MetaTrader 5, allow DLL imports in the Expert properties, turn
