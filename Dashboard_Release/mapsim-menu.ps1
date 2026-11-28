@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.3.4'
+$MapsimMenuVersion = '1.3.5'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 
 # raw.githubusercontent.com can hand back the file from before the newest push
@@ -1236,6 +1236,44 @@ function Install-Agent {
   }
 }
 
+# A real Python 3, never the Microsoft Store alias. `Get-Command python` answers
+# with the App Execution Alias under WindowsApps on a normal Windows 11 machine:
+# that path is a reparse stub whose target moves with the Store install and which
+# stops existing when the alias is switched off, so a background task pointing at
+# it is a task that can die with nobody watching. The per-user install under
+# %LOCALAPPDATA%\Python is the first choice, the `py` launcher second, and PATH
+# last and only when it does not resolve to WindowsApps. Each candidate is asked
+# for its major version, so a stub that answers nothing is skipped instead of
+# being handed to the Agent.
+function Get-PythonExe {
+  $seen = @{}
+  $candidates = @()
+  foreach ($root in @("$env:LOCALAPPDATA\Python", $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+    if (-not $root -or -not (Test-Path $root)) { continue }
+    foreach ($pattern in @('python.exe', 'Python*\python.exe', 'python*\python.exe')) {
+      Get-ChildItem -Path (Join-Path $root $pattern) -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch 'WindowsApps' } |
+        Sort-Object FullName -Descending |
+        ForEach-Object { $candidates += @{ File = $_.FullName; Args = @() } }
+    }
+  }
+  $py = Get-Command py.exe -ErrorAction SilentlyContinue
+  if ($py) { $candidates += @{ File = $py.Source; Args = @('-3') } }
+  foreach ($name in @('python.exe', 'python3.exe')) {
+    $hit = Get-Command $name -ErrorAction SilentlyContinue
+    if ($hit -and $hit.Source -and $hit.Source -notmatch 'WindowsApps') {
+      $candidates += @{ File = $hit.Source; Args = @() }
+    }
+  }
+  foreach ($c in $candidates) {
+    if ($seen[$c.File]) { continue }
+    $seen[$c.File] = $true
+    $version = (& $c.File @($c.Args) '-c' 'import sys;print(sys.version_info[0])' 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -eq 0 -and $version -eq '3') { return $c }
+  }
+  return $null
+}
+
 function Get-AgentLauncher([switch]$Quiet) {
   if ($script:AgentLauncher) { return $script:AgentLauncher }
   if (Test-Path $AgentExe) {
@@ -1249,15 +1287,15 @@ function Get-AgentLauncher([switch]$Quiet) {
     }
     return $null
   }
-  $python = Get-Command python -ErrorAction SilentlyContinue
+  $python = Get-PythonExe
   if (-not $python) {
     if (-not $Quiet) {
-      Write-Host 'error: Python was not found, and no frozen Agent is installed.' -ForegroundColor Red
+      Write-Host 'error: Python 3 was not found, and no frozen Agent is installed.' -ForegroundColor Red
       Write-Host 'hint: install Python 3, or drop the frozen mapsim-license-agent.exe into the agent\dist folder.' -ForegroundColor Yellow
     }
     return $null
   }
-  $script:AgentLauncher = @{ File = $python.Source; Args = @($AgentPy) }
+  $script:AgentLauncher = @{ File = $python.File; Args = @($python.Args) + @($AgentPy) }
   return $script:AgentLauncher
 }
 
@@ -1702,8 +1740,43 @@ function Toggle-AgentSchedule {
   if (-not $launcher) { return }
   $target = '"{0}" {1}refresh' -f $launcher.File, (($launcher.Args | ForEach-Object { '"{0}" ' -f $_ }) -join '')
   $null = & schtasks.exe /Create /SC HOURLY /TN $AgentTaskName /TR $target /F 2>&1
-  if ($LASTEXITCODE -eq 0) { Write-Host 'automatic licence refresh enabled (every hour).' }
+  if ($LASTEXITCODE -eq 0) {
+    $null = Clear-AgentTaskBatteryFlags $AgentTaskName
+    Write-Host 'automatic licence refresh enabled (every hour).'
+  }
   else { Write-Host 'the scheduled refresh could not be created.' -ForegroundColor Yellow }
+}
+
+# `schtasks /Create` writes DisallowStartIfOnBatteries and StopIfGoingOnBatteries
+# as true, which is the documented reason a task records 0x800710E0 ("the task
+# has not run because the computer is running on battery power") on a desktop
+# that has no battery at all, while starting the same task by hand returns 0 and
+# looks healthy. The task is exported, those two flags are cleared, StartWhenAvailable
+# is raised so a missed hour is caught up after sleep, and the task is registered
+# again from the corrected XML. The export is UTF-16 and schtasks only reads UTF-16
+# back, so the file is written with a BOM and the declaration it arrived with.
+function Clear-AgentTaskBatteryFlags([string]$Name) {
+  $xml = Join-Path $env:TEMP ('mapsim-agent-task-{0}.xml' -f $PID)
+  try {
+    & schtasks.exe /Query /TN $Name /XML > $xml 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $xml)) { return $false }
+    $text = [System.IO.File]::ReadAllText($xml)
+    $text = $text -replace '<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>', '<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>'
+    $text = $text -replace '<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>', '<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>'
+    $text = $text -replace '<StartWhenAvailable>false</StartWhenAvailable>', '<StartWhenAvailable>true</StartWhenAvailable>'
+    [System.IO.File]::WriteAllText($xml, $text, (New-Object System.Text.UnicodeEncoding($false, $true)))
+    & schtasks.exe /Create /TN $Name /XML $xml /F *> $null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host 'note: the refresh task was created but still stops on battery power.' -ForegroundColor Yellow
+      return $false
+    }
+    return $true
+  } catch {
+    Write-Host 'note: the refresh task was created but its power flags were not cleared.' -ForegroundColor Yellow
+    return $false
+  } finally {
+    Remove-Item -Path $xml -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Remove-AgentLease {

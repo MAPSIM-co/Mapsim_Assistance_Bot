@@ -51,7 +51,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-AGENT_VERSION = "2.2.1"
+AGENT_VERSION = "2.2.3"
 AGENT_NAME = "mapsim-license-agent"
 
 # Architecture 3.3 / 5.5: the EA enforces the span, the Agent writes inside it.
@@ -1152,6 +1152,26 @@ def print_status(verdict: Verdict) -> None:
         print(line)
 
 
+def terminal_account(directory: Path) -> tuple[str, str, str]:
+    """The trading account the Expert is running on, read from its snapshot.
+
+    Architecture 5.1 binds a serial to a trading account, so activation has to
+    report it. Before 24.0.31 nothing sent ``login``, the server signed
+    ``\"acct\":null`` and the Expert therefore ran on any account; ``--login``
+    stays available for a machine where MetaTrader has not run yet.
+    """
+    snapshot = _newest_snapshot(terminal_folders(directory))
+    account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
+    report = snapshot.get("report") if isinstance(snapshot.get("report"), dict) else {}
+    licence_obj = report.get("license") if isinstance(report.get("license"), dict) else {}
+    login = str(licence_obj.get("account_login_terminal") or account.get("login") or "").strip()
+    broker = str(account.get("server") or "").strip()
+    kind = str(account.get("account_type") or account.get("type") or "").strip().lower()
+    if kind not in ("demo", "real"):
+        kind = ""
+    return login, broker, kind
+
+
 def cmd_activate(args: argparse.Namespace) -> int:
     directory = _secure_dir(state_dir())
     serial = args.serial or (sys.stdin.readline().strip() if not sys.stdin.isatty() else "")
@@ -1163,6 +1183,7 @@ def cmd_activate(args: argparse.Namespace) -> int:
     store = KeyStore(directory)
     key = store.get()
     api = Api(api_base(args), serial, str(record["device_id"]))
+    detected_login, detected_broker, detected_type = terminal_account(directory)
     payload = {
         "device_id": record["device_id"],
         "fingerprint": record.get("fingerprint", ""),
@@ -1171,9 +1192,9 @@ def cmd_activate(args: argparse.Namespace) -> int:
         "os": platform.system().lower(),
         "arch": platform.machine().lower(),
         "agent_version": AGENT_VERSION,
-        "broker": args.broker or "",
-        "login": args.login or "",
-        "account_type": args.account_type or "",
+        "broker": (args.broker or detected_broker).strip(),
+        "login": (args.login or detected_login).strip(),
+        "account_type": (args.account_type or detected_type).strip(),
         "label": args.label or None,
     }
     with LeaseLock(directory):
@@ -1193,6 +1214,26 @@ def cmd_activate(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def refresh_due(payload: dict, verdict, *, force: bool, now: int | None = None) -> bool:
+    """True when this run must talk to the server.
+
+    ``force`` wins; a verdict that is not in force must be re-checked; an
+    **unbound** lease (no ``acct``) always is, because the server signs the
+    account onto the first report and nothing else ever binds it (D-70). The
+    freshness skip exists to spare the server an hourly call inside a lease
+    that is already valid, and applying it to an unbound lease postponed the
+    binding to the last ``REFRESH_INTERVAL`` of the lease - a year, on the
+    365-day serial measured here - so the Expert started on any account.
+    """
+    if force:
+        return True
+    if verdict.code not in ("ACTIVE", "GRACE"):
+        return True
+    if not str(payload.get("acct") or "").strip():
+        return True
+    return (verdict.exp - (now if now is not None else now_ts())) <= REFRESH_INTERVAL
+
+
 def cmd_refresh(args: argparse.Namespace) -> int:
     directory = state_dir()
     serial = args.serial or stored_serial(directory)
@@ -1206,7 +1247,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         raise AgentError("no lease on this machine; activate first", code="NO_LEASE", exit_code=EXIT_SERIAL_INVALID)
     payload = lease.get("payload") or {}
     verdict = current_verdict(directory, args.product)
-    if not args.force and verdict.exp - now_ts() > REFRESH_INTERVAL and verdict.code in ("ACTIVE", "GRACE"):
+    if not refresh_due(payload, verdict, force=args.force):
         print_status(verdict)
         print("refreshed=no")
         return EXIT_OK
@@ -1214,12 +1255,23 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     store = KeyStore(directory)
     key = store.get()
     api = Api(api_base(args), serial, str(record["device_id"]))
+    # 24.0.31: report the account on every refresh. The server signs `acct` into
+    # the lease and refuses a refresh from a different account, so this is the
+    # half that keeps the binding true after the first activation.
+    detected_login, detected_broker, detected_type = terminal_account(directory)
+    if not detected_login and not str(payload.get("acct") or "").strip():
+        # The server can only bind what it is told. Say why it was told nothing
+        # instead of leaving a licence unbound when the menu reports it as fine.
+        log_line("REFRESH no-account snapshot has no terminal login; the server cannot bind this machine")
     body = api.post(
         "/v1/refresh",
         {
             "device_id": record["device_id"],
             "lease_id": str(payload.get("lease_id") or ""),
             "fingerprint": record.get("fingerprint", ""),
+            "login": detected_login,
+            "broker": detected_broker,
+            "account_type": detected_type,
         },
     )
     envelope = body.get("lease")
