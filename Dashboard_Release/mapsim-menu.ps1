@@ -28,6 +28,16 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # replaces its own installed file when that one is newer (Update-MenuSelf).
 $MapsimMenuVersion = '1.3.1'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
+
+# raw.githubusercontent.com keeps serving the previous file for a few minutes
+# after a push. Measured here: right after 1.3.1 was published, a plain fetch of
+# this menu still returned 1.3.0, so the installer and the self-update below both
+# gave the customer the old build and reported success. The query string is part
+# of the cache key, so a fresh value goes to the origin and the newest file is
+# the one that lands. Release archives are unaffected and do not use this.
+function Get-FreshUrl([string]$Url) {
+  return $Url + '?v=' + [DateTime]::UtcNow.Ticks
+}
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
 # when this file was written. It is never installed over a newer build.
@@ -1182,7 +1192,7 @@ function Install-Agent {
   $local = Get-AgentFileVersion $AgentPy
   try {
     New-Item -ItemType Directory -Force $AgentDir | Out-Null
-    $text = (Invoke-WebRequest -Uri $AgentUrl -TimeoutSec 30 -UseBasicParsing).Content
+    $text = (Invoke-WebRequest -Uri (Get-FreshUrl $AgentUrl) -TimeoutSec 30 -UseBasicParsing).Content
     if (-not ($text -is [string]) -or $text -notmatch 'AGENT_VERSION') {
       throw 'the downloaded file is not the licence Agent.'
     }
@@ -2195,7 +2205,7 @@ function Update-Refresh([switch]$Force) {
 # the dashboard archive does not carry this file.
 function Update-MenuSelf {
   try {
-    $text = (Invoke-WebRequest -Uri $MenuUrl -TimeoutSec 15 -UseBasicParsing).Content
+    $text = (Invoke-WebRequest -Uri (Get-FreshUrl $MenuUrl) -TimeoutSec 15 -UseBasicParsing).Content
     if (-not ($text -is [string]) -or -not $text) { return }
     if ($text -notmatch '(?m)^\$MapsimMenuVersion = ''([0-9][0-9.]*)''') { return }
     $remote = $Matches[1]

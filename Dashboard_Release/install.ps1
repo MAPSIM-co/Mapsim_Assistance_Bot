@@ -46,7 +46,13 @@ if (($RemoveService -or $Uninstall) -and (Test-Path $MenuPath)) {
 Write-Host 'Mapsim BOT control center bootstrap'
 Write-Host '  downloading the control center ...'
 $tmp = Join-Path ([IO.Path]::GetTempPath()) 'mapsim-menu.ps1'
-Invoke-WebRequest -Uri $MenuUrl -OutFile $tmp -TimeoutSec 60 -UseBasicParsing
+# raw.githubusercontent.com can keep serving the file from before the newest push
+# for a few minutes, so a plain fetch here installs the previous control center and
+# still succeeds. Measured: right after a release the bootstrap gave the build from
+# the commit before it. The query string is part of the cache key, so a fresh value
+# always reaches the origin. The control center does the same for its own update.
+$fresh = $MenuUrl + '?v=' + [DateTime]::UtcNow.Ticks
+Invoke-WebRequest -Uri $fresh -OutFile $tmp -TimeoutSec 60 -UseBasicParsing
 
 $pass = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tmp, '-Bootstrap')
 if ($Public) { $pass += '-Public' }

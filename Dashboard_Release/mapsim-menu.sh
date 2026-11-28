@@ -56,6 +56,12 @@ AGENT_DIR="$HOME/.local/share/MapsimBOT/agent"
 AGENT_PY="$AGENT_DIR/mapsim_license_agent.py"
 AGENT_BIN="$AGENT_DIR/dist/mapsim-license-agent"
 AGENT_URL="https://raw.githubusercontent.com/$REPO/main/Agent/mapsim_license_agent.py"
+
+# raw.githubusercontent.com keeps serving the previous file for a few minutes
+# after a push, so a plain fetch of the menu or the Agent can hand the customer
+# the build from before the release and still succeed. The query string is part
+# of the cache key, so a fresh value reaches the origin instead of the edge.
+fresh_url() { printf '%s?v=%s' "$1" "$(date +%s 2>/dev/null || echo 0)"; }
 AGENT_LEASE="$LICENSE_DIR/lease.json"
 AGENT_TIMER="mapsim-license-agent"
 AGENT_LABEL="com.mapsim.license"
@@ -909,7 +915,7 @@ agent_install() {
   fi
   mkdir -p "$AGENT_DIR" || return 1
   msg_info "checking the licence Agent ..."
-  if ! curl -fsSL --max-time 30 "$AGENT_URL" -o "$AGENT_PY.new" 2>/dev/null; then
+  if ! curl -fsSL --max-time 30 "$(fresh_url "$AGENT_URL")" -o "$AGENT_PY.new" 2>/dev/null; then
     rm -f "$AGENT_PY.new"
     if [ -n "$local" ]; then
       msg_warn "the licence Agent could not be refreshed; version $local keeps working."
@@ -1800,7 +1806,7 @@ refresh_menu_self() {
   [ -n "${MENU_URL:-}" ] || return 0
   dest="$MENU_DEST"
   tmp="$dest.new.$$"
-  if ! curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" -o "$tmp" "$MENU_URL" 2>/dev/null; then
+  if ! curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" -o "$tmp" "$(fresh_url "$MENU_URL")" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null || true
     return 0
   fi
