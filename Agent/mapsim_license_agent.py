@@ -51,7 +51,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-AGENT_VERSION = "2.0.2"
+AGENT_VERSION = "2.1.0"
 AGENT_NAME = "mapsim-license-agent"
 
 # Architecture 3.3 / 5.5: the EA enforces the span, the Agent writes inside it.
@@ -76,6 +76,13 @@ LOCK_NAME = "lease.json.lock"
 MQL5_SUBDIR = ("Files", "MapsimLive")
 LEASE_COPY_NAME = "license_lease.json"
 GUARD_COPY_NAME = "license_guard.dat"
+
+# 2.1.0: the dashboard reads its own two files (dashboard.license /
+# dashboard.auth) but a customer owns one licence, not two. This command turns
+# the active lease into the material for those files, so the serial from the
+# shop opens the Expert and the dashboard alike.
+DASHBOARD_TAG = "DASHBOARD"
+DASHBOARD_ACTIVE_CODE = "213250101"
 
 # 2.0.2: the public licence host is the shop domain - the API is mounted at
 # /v1 under the certificate the customer already reaches. The old default
@@ -1226,6 +1233,109 @@ def cmd_status(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# =====================================================================
+# the dashboard login, derived from the same lease
+# =====================================================================
+def _newest_snapshot(folders: list[Path]) -> dict[str, Any]:
+    """The freshest snapshot.json among the recorded terminals, or {}."""
+    best: tuple[float, Path] | None = None
+    for folder in folders:
+        candidate = folder.joinpath(*MQL5_SUBDIR) / "snapshot.json"
+        try:
+            stamp = candidate.stat().st_mtime
+        except OSError:
+            continue
+        if best is None or stamp > best[0]:
+            best = (stamp, candidate)
+    if best is None:
+        return {}
+    return read_json(best[1]) or {}
+
+
+def _server_offset(snapshot: dict[str, Any]) -> int:
+    """Seconds the broker clock runs ahead of this machine (0 when unknown).
+
+    The dashboard compares its licence expiry with broker time, so an expiry
+    formatted in local time would be wrong by the broker offset.
+    """
+    stamp = "%Y.%m.%d %H:%M:%S"
+    try:
+        server = time.strptime(str(snapshot.get("server_time") or ""), stamp)
+        local = time.strptime(str(snapshot.get("local_time") or ""), stamp)
+    except ValueError:
+        return 0
+    return int(time.mktime(server) - time.mktime(local))
+
+
+def _dashboard_token(verdict: Verdict, directory: Path, snapshot: dict[str, Any]) -> tuple[str, str]:
+    """(token, source): the one string the dashboard checks against the Expert.
+
+    The dashboard splits its licence text on "-", so a serial or a key with
+    dashes cannot be used verbatim; stripping them keeps one memorable value.
+    When the Expert already exports its own licence user, that exact text is
+    used instead: the dashboard cross-checks it with the Expert and would
+    refuse any other spelling.
+    """
+    report = snapshot.get("report") if isinstance(snapshot.get("report"), dict) else {}
+    licence_obj = report.get("license") if isinstance(report.get("license"), dict) else {}
+    expert_user = str(licence_obj.get("license_user") or "").strip()
+    if expert_user and "-" not in expert_user:
+        return expert_user, "expert"
+    source = verdict.key_hint or stored_serial(directory)
+    return "".join(ch for ch in str(source) if ch.isalnum()).upper(), "key"
+
+
+def cmd_dashboard_login(args: argparse.Namespace) -> int:
+    """Print the dashboard login derived from the active lease.
+
+    Nothing is written here: the control center encrypts these fields into the
+    dashboard's own files with the tool its platform already has.
+    """
+    directory = state_dir()
+    verdict = current_verdict(directory)
+    if verdict.code not in ("ACTIVE", "GRACE"):
+        print("status=NOT_ACTIVE")
+        print(f"code={verdict.code}")
+        print("message=activate the serial first")
+        return EXIT_DENIED
+    if verdict.entitlements and DASHBOARD_TAG not in verdict.entitlements:
+        print("status=NO_DASHBOARD")
+        print(f"code={verdict.code}")
+        print("message=this licence does not include the dashboard")
+        return EXIT_DENIED
+
+    snapshot = _newest_snapshot(terminal_folders(directory))
+    report = snapshot.get("report") if isinstance(snapshot.get("report"), dict) else {}
+    licence_obj = report.get("license") if isinstance(report.get("license"), dict) else {}
+    account_obj = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
+    account = str(licence_obj.get("account_login_terminal") or account_obj.get("login") or "").strip()
+    if not account:
+        print("status=NO_ACCOUNT")
+        print("message=start MetaTrader with the Expert on a chart once, then repeat")
+        return EXIT_DENIED
+
+    token, source = _dashboard_token(verdict, directory, snapshot)
+    if not token or (source == "key" and len(token) < 6):
+        print("status=NO_KEY")
+        print("message=the lease carries no licence key")
+        return EXIT_DENIED
+
+    # In GRACE the dashboard keeps working to the end of grace, like the EA.
+    moment = verdict.exp if verdict.code == "ACTIVE" else max(verdict.exp, verdict.grace_until)
+    expiry = time.strftime("%Y.%m.%d %H:%M", time.localtime(moment + _server_offset(snapshot)))
+    print("status=OK")
+    print(f"code={verdict.code}")
+    print(f"user={token}")
+    print(f"password={token}")
+    print(f"source={source}")
+    print(f"account={account}")
+    print(f"expiry={expiry}")
+    print(f"expires_at={moment}")
+    print(f"product={verdict.payload.get('prod', '')}")
+    log_line(f"DASHBOARD-LOGIN {verdict.code} account={account}")
+    return EXIT_OK
+
+
 def cmd_link_terminal(args: argparse.Namespace) -> int:
     """Record the MQL5 folder(s) so the lease reaches the EA (5.4 / 10.2).
 
@@ -1348,6 +1458,9 @@ def build_parser() -> argparse.ArgumentParser:
     link = sub.add_parser("link-terminal", help="record the MQL5 folder(s) the lease must reach")
     link.add_argument("--path", default="", help="MQL5 folder; auto-discovered when omitted")
     link.set_defaults(handler=cmd_link_terminal)
+
+    dash = sub.add_parser("dashboard-login", help="the dashboard login derived from the lease")
+    dash.set_defaults(handler=cmd_dashboard_login)
 
     return parser
 
