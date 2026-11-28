@@ -23,7 +23,7 @@ FALLBACK_VERSION="dashboard-v1.0.9"
 # on the same number never sees the fix: refresh_menu_self only replaces the file
 # when the published value is greater. It is kept equal to $MapsimMenuVersion in
 # mapsim-menu.ps1, because both platforms ship the same fixes.
-MENU_VERSION=1.2.0
+MENU_VERSION=1.2.1
 MENU_URL="https://raw.githubusercontent.com/$REPO/main/Dashboard_Release/mapsim-menu.sh"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
@@ -850,16 +850,34 @@ agent_present() {
   [ -x "$AGENT_BIN" ] || [ -f "$AGENT_PY" ]
 }
 
+# AGENT_VERSION of a downloaded Agent file, or empty when it is missing or
+# carries no readable version.
+agent_file_version() {
+  sed -n 's/^[[:space:]]*AGENT_VERSION[[:space:]]*=[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "$1" 2>/dev/null | head -n 1 || true
+}
+
+# A frozen binary in dist/ always wins and is never touched. Otherwise the
+# published script is fetched even when a copy is installed: a fix in the Agent
+# (a server address, a new call) must reach a machine that still holds the older
+# file, which the previous early return made impossible. The installed file is
+# replaced only when the published AGENT_VERSION is strictly greater, and a
+# failed download leaves it working.
 agent_install() {
-  if agent_present; then return 0; fi
+  [ -x "$AGENT_BIN" ] && return 0
+  local=$(agent_file_version "$AGENT_PY")
   if ! command -v curl >/dev/null 2>&1; then
+    [ -n "$local" ] && return 0
     msg_err "curl is required to download the licence Agent."
     return 1
   fi
   mkdir -p "$AGENT_DIR" || return 1
-  msg_info "downloading the licence Agent ..."
+  msg_info "checking the licence Agent ..."
   if ! curl -fsSL --max-time 30 "$AGENT_URL" -o "$AGENT_PY.new" 2>/dev/null; then
     rm -f "$AGENT_PY.new"
+    if [ -n "$local" ]; then
+      msg_warn "the licence Agent could not be refreshed; version $local keeps working."
+      return 0
+    fi
     msg_err "the licence Agent could not be downloaded (no internet?)."
     echo "hint: check the connection and try again; the dashboard is not affected."
     return 1
@@ -867,11 +885,21 @@ agent_install() {
   if ! grep -q 'AGENT_VERSION' "$AGENT_PY.new" 2>/dev/null; then
     rm -f "$AGENT_PY.new"
     msg_err "the downloaded file is not the licence Agent."
+    [ -n "$local" ] && return 0
     return 1
+  fi
+  remote=$(agent_file_version "$AGENT_PY.new")
+  if [ -n "$local" ] && { [ -z "$remote" ] || ! version_gt "$remote" "$local"; }; then
+    rm -f "$AGENT_PY.new"
+    return 0
   fi
   mv "$AGENT_PY.new" "$AGENT_PY"
   chmod 600 "$AGENT_PY" 2>/dev/null || true
-  msg_ok "the licence Agent is installed in $AGENT_DIR"
+  if [ -n "$local" ] && [ -n "$remote" ]; then
+    msg_ok "the licence Agent was updated from $local to $remote in $AGENT_DIR"
+  else
+    msg_ok "the licence Agent is installed in $AGENT_DIR"
+  fi
   return 0
 }
 

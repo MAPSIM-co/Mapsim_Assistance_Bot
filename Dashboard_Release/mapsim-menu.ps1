@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.2.0'
+$MapsimMenuVersion = '1.2.1'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
@@ -866,19 +866,48 @@ function Test-AgentPresent {
   return ((Test-Path $AgentExe) -or (Test-Path $AgentPy))
 }
 
+# AGENT_VERSION of a downloaded Agent file, or '' when the file is missing or
+# carries no readable version. The Agent is one script, so the constant is read
+# from the text instead of starting an interpreter.
+function Get-AgentFileVersion([string]$Path) {
+  if (-not (Test-Path $Path)) { return '' }
+  $hit = Select-String -Path $Path -Pattern '^\s*AGENT_VERSION\s*=\s*"([0-9][0-9.]*)"' -ErrorAction SilentlyContinue |
+         Select-Object -First 1
+  if ($hit -and $hit.Matches.Count -gt 0) { return $hit.Matches[0].Groups[1].Value }
+  return ''
+}
+
+# A frozen build in agent\dist always wins and is never touched. Otherwise the
+# published script is fetched even when a copy is already installed: a fix that
+# lands in the Agent (a server address, a new call) must reach a machine that
+# still holds the older file, which the previous early return made impossible.
+# Nothing is overwritten unless the published AGENT_VERSION is strictly greater,
+# and a failed download leaves the installed copy working.
 function Install-Agent {
-  if (Test-AgentPresent) { return $true }
+  if (Test-Path $AgentExe) { return $true }
+  $local = Get-AgentFileVersion $AgentPy
   try {
     New-Item -ItemType Directory -Force $AgentDir | Out-Null
     $text = (Invoke-WebRequest -Uri $AgentUrl -TimeoutSec 30 -UseBasicParsing).Content
     if (-not ($text -is [string]) -or $text -notmatch 'AGENT_VERSION') {
       throw 'the downloaded file is not the licence Agent.'
     }
+    $remote = ''
+    if ($text -match '(?m)^\s*AGENT_VERSION\s*=\s*"([0-9][0-9.]*)"') { $remote = $Matches[1] }
+    # same number, older copy, or no version in the published file: keep what is
+    # installed and touch nothing.
+    if ($local -and (-not $remote -or -not (Test-NewerDashboardVersion $remote $local))) { return $true }
     Set-Content -Path $AgentPy -Value $text -Encoding UTF8
     Write-Host 'the licence Agent was downloaded to:'
     Write-Host "  $AgentDir"
+    if ($local) { Write-Host "  (replaced $local with $remote)" }
     return $true
   } catch {
+    if (Test-AgentPresent) {
+      Write-Host "warning: the licence Agent could not be refreshed - $($_.Exception.Message)" -ForegroundColor Yellow
+      Write-Host 'the installed copy keeps working.' -ForegroundColor Yellow
+      return $true
+    }
     Write-Host "error: the licence Agent could not be installed - $($_.Exception.Message)" -ForegroundColor Red
     Write-Host 'hint: check the internet, then try again; the dashboard is not affected.' -ForegroundColor Yellow
     return $false

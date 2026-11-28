@@ -51,7 +51,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-AGENT_VERSION = "2.0.1"
+AGENT_VERSION = "2.0.2"
 AGENT_NAME = "mapsim-license-agent"
 
 # Architecture 3.3 / 5.5: the EA enforces the span, the Agent writes inside it.
@@ -77,7 +77,11 @@ MQL5_SUBDIR = ("Files", "MapsimLive")
 LEASE_COPY_NAME = "license_lease.json"
 GUARD_COPY_NAME = "license_guard.dat"
 
-DEFAULT_API = "https://license.mapsimfx.sbs"
+# 2.0.2: the public licence host is the shop domain - the API is mounted at
+# /v1 under the certificate the customer already reaches. The old default
+# (license.mapsimfx.sbs) never existed in DNS, so every activation ended in
+# EXIT_NETWORK before a single byte was sent.
+DEFAULT_API = "https://shop.mapsim.shop"
 
 EXIT_OK = 0
 EXIT_SERIAL_INVALID = 10
