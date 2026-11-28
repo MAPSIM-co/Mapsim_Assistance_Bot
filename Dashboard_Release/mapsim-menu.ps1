@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.3.2'
+$MapsimMenuVersion = '1.3.3'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 
 # raw.githubusercontent.com keeps serving the previous file for a few minutes
@@ -541,6 +541,9 @@ $script:FaRules = @(
   @{ p = '^ends (.+) - the licence ends later, item 1 rebuilds it$'; r = 'تا {0} است ولی لایسنس دیرتر تمام می‌شود — گزینه ۱ بازسازی می‌کند' }
   @{ p = '^the login ends (.+) but the licence ends (.+) UTC - item 1 rebuilds it$'; r = 'ورود تا {0} است ولی لایسنس تا {1} UTC — گزینه ۱ بازسازی می‌کند' }
   @{ p = '^the Expert licence cannot open the dashboard \((.+)\): (.+)$'; r = 'لایسنس اکسپرت داشبورد را باز نمی‌کند ({0}): {1}' }
+  # The only English a Persian customer could still meet in the licence flow is
+  # this sentence, printed when a newer Agent replaces the installed one.
+  @{ p = '^\(replaced (.+) with (.+)\)$'; r = '(نسخه {0} با {1} جایگزین شد)' }
   @{ p = '^the dashboard login could not be saved - (.+)$'; r = 'ورود داشبورد ذخیره نشد — {0}' }
   @{ p = '^  login    : (.+)$'; r = '  کاربر: {0}' }
   @{ p = '^  password : (.+)$'; r = '  رمز: {0}' }
