@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.2.1'
+$MapsimMenuVersion = '1.2.2'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
@@ -62,6 +62,8 @@ $AgentLeaseFile = Join-Path $LicenseDir 'lease.json'
 $AgentTaskName = 'MapsimLicenseAgent'
 $script:AgentLauncher = $null
 $script:AgentSummary = $null
+# Why the derived dashboard login could not be built; printed by the callers.
+$script:DashboardLoginNote = ''
 $VersionFile = Join-Path $ConfigDir 'dashboard.version'
 $UpdatePolicyFile = Join-Path $ConfigDir 'update-policy'
 $UpdateCacheFile = Join-Path $ConfigDir 'update-cache.json'
@@ -137,7 +139,10 @@ $script:FaText = @{
   'Expert Advisor: install / update'  = 'اکسپرت: نصب / بروزرسانی'
   'Expert Advisor: version check'     = 'اکسپرت: بررسی نسخه'
   'Disk space / server storage'       = 'فضای دیسک / ذخیره‌سازی'
-  'License (dashboard login + Expert)' = 'لایسنس (ورود به داشبورد + اکسپرت)'
+  'License (one serial: Expert + dashboard)' = 'لایسنس (یک سریال: اکسپرت + داشبورد)'
+  'Dashboard login'                   = 'ورود داشبورد'
+  'ready'                             = 'آماده'
+  'not built'                         = 'ساخته نشده'
   'Update policy (notify / auto / off)' = 'روش بروزرسانی (اطلاع / خودکار / خاموش)'
   'Exit'                              = 'خروج'
   # The L item names the language it switches TO, never the one on screen, so
@@ -217,19 +222,39 @@ $script:FaText = @{
   'note: Persian needs the window; press L and choose English for the console.' = 'توجه: فارسی به پنجره نیاز دارد؛ کلید L را بزنید و انگلیسی را برای همین پنجره متنی انتخاب کنید.'
 
   # --- license -----------------------------------------------------------
-  'license files:'                    = 'فایل‌های لایسنس:'
+  # One serial, two programs: the dashboard login is derived from the Expert
+  # licence, so the customer never buys or types a second one.
+  'one serial for both halves: the Expert and the dashboard' = 'یک سریال برای هر دو بخش: اکسپرت و داشبورد'
+  'dashboard login: not built yet'    = 'ورود داشبورد: هنوز ساخته نشده'
+  'Dashboard login (built from your Expert licence - nothing extra to buy)' = 'ورود داشبورد (از لایسنس اکسپرت ساخته می‌شود — چیز اضافه‌ای لازم نیست)'
+  '1) Build / refresh the dashboard login now' = '۱) ساخت / بازسازی ورود داشبورد'
+  '2) Show the dashboard login status' = '۲) وضعیت ورود داشبورد'
+  '3) Remove the saved dashboard login' = '۳) حذف ورود داشبورد ذخیره‌شده'
+  'Expert licence (the serial from the shop)' = 'لایسنس اکسپرت (سریالی که از فروشگاه گرفتید)'
+  '12) Enter an old dashboard licence (only if support sent one)' = '۱۲) ورود لایسنس قدیمی داشبورد (فقط اگر پشتیبانی فرستاده باشد)'
+  'the dashboard login is ready - start the dashboard from the main menu (2).' = 'ورود داشبورد آماده است — داشبورد را از منوی اصلی (گزینه ۲) اجرا کنید.'
+  'dashboard login : not prepared - item 1 builds it from your Expert licence' = 'ورود داشبورد: آماده نیست — گزینه ۱ آن را از لایسنس اکسپرت می‌سازد'
+  'dashboard login : ACTIVE'          = 'ورود داشبورد: فعال'
+  'dashboard login : NOT ACTIVE - the dashboard will not start (item 1 rebuilds it)' = 'ورود داشبورد: فعال نیست — داشبورد اجرا نمی‌شود (گزینه ۱ بازسازی می‌کند)'
+  'remove the saved dashboard login? it is rebuilt from your Expert licence on the next start (y/n)' = 'ورود داشبورد ذخیره‌شده حذف شود؟ در اجرای بعدی از لایسنس اکسپرت ساخته می‌شود (y/N)'
+  'dashboard login files:'            = 'فایل‌های ورود داشبورد:'
+  'the dashboard login was removed.'   = 'ورود داشبورد حذف شد.'
+  'the dashboard login was prepared from your Expert licence:' = 'ورود داشبورد از لایسنس اکسپرت شما ساخته شد:'
+  '  it renews itself whenever the Expert licence is refreshed.' = '  با هر بازسازی لایسنس اکسپرت خودش بروز می‌شود.'
+  'the dashboard runs on your Expert licence - preparing the login ...' = 'داشبورد با لایسنس اکسپرت شما کار می‌کند — در حال ساخت ورود ...'
+  'the Expert licence is not active on this machine yet.' = 'لایسنس اکسپرت هنوز روی این رایانه فعال نیست.'
+  'activate your serial in the License menu (item 4), then start the dashboard again.' = 'سریال خود را در منوی License (مورد ۴) فعال کنید، سپس داشبورد را دوباره اجرا کنید.'
   'this license was rejected:'        = 'این لایسنس رد شد:'
   'nothing was saved.'                = 'چیزی ذخیره نشد.'
   'license saved:'                    = 'لایسنس ذخیره شد:'
   'no license entered.'               = 'لایسنسی وارد نشد.'
   'back.'                             = 'بازگشت.'
   'no license is saved.'              = 'لایسنسی ذخیره نشده است.'
-  'license removed.'                  = 'لایسنس حذف شد.'
   'cancelled.'                        = 'لغو شد.'
   'cancelled - the running dashboard was not changed.' = 'لغو شد — داشبورد در حال اجرا تغییر نکرد.'
   'the username and password must not be empty.' = 'نام کاربری و رمز نباید خالی باشند.'
   'the license check failed:'         = 'بررسی لایسنس انجام نشد:'
-  'the dashboard was not started. Fix the license in menu 12.' = 'داشبورد اجرا نشد. لایسنس را در گزینه ۱۲ اصلاح کنید.'
+  'the dashboard was not started. Rebuild the login from the License menu (item 1).' = 'داشبورد اجرا نشد. ورود را از منوی License (مورد ۱) بازسازی کنید.'
   'the dashboard was not started - the license is required (menu 12).' = 'داشبورد اجرا نشد — لایسنس لازم است (گزینه ۱۲).'
   'a valid Mapsim license is required to run the dashboard.' = 'برای اجرای داشبورد یک لایسنس معتبر Mapsim لازم است.'
   'the installed dashboard build does not support the license yet.' = 'نسخه نصب‌شده داشبورد هنوز از لایسنس پشتیبانی نمی‌کند.'
@@ -350,7 +375,8 @@ $script:FaText = @{
   '1) restart MetaTrader 5'           = '۱) MetaTrader 5 را ری‌استارت کنید'
   '2) allow DLL imports in the EA options' = '۲) در تنظیمات اکسپرت اجازه وارد کردن DLL را بدهید'
   '3) attach the Mapsim Assistance Bot Expert to your chart' = '۳) اکسپرت Mapsim Assistance Bot را روی چارت خود بیندازید'
-  '4) enter your license (from the Mapsim Bot in Telegram)' = '۴) لایسنس خود را وارد کنید (از Mapsim Bot در تلگرام)'
+  '4) activate your serial in the License menu (item 4)' = '۴) سریال خود را در منوی License فعال کنید (مورد ۴)'
+  '5) the same serial opens the dashboard (main menu - 2)' = '۵) همان سریال داشبورد را نیز باز می‌کند (منوی اصلی — گزینه ۲)'
   'Expert Advisor: not installed through Mapsim_BOT' = 'اکسپرت: از طریق Mapsim_BOT نصب نشده'
   '(could not check - no internet?)'  = '(بررسی نشد — اینترنت قطع است؟)'
   'a newer version is available - install it now? (y/n)' = 'نسخه جدیدتری موجود است — همین حالا نصب شود؟ (y/N)'
@@ -406,6 +432,13 @@ $script:FaRules = @(
   @{ p = '^latest version\s*:\s*(.+)$'; r = 'آخرین نسخه: {0}' }
 
   # --- values inside those lines -----------------------------------------
+  @{ p = '^dashboard login: ready \((.+)\)$'; r = 'ورود داشبورد: آماده ({0})' }
+  @{ p = '^the Expert licence cannot open the dashboard \((.+)\): (.+)$'; r = 'لایسنس اکسپرت داشبورد را باز نمی‌کند ({0}): {1}' }
+  @{ p = '^the dashboard login could not be saved - (.+)$'; r = 'ورود داشبورد ذخیره نشد — {0}' }
+  @{ p = '^  login    : (.+)$'; r = '  کاربر: {0}' }
+  @{ p = '^  password : (.+)$'; r = '  رمز: {0}' }
+  @{ p = '^  account  : (.+)$'; r = '  حساب: {0}' }
+  @{ p = '^  valid to : (.+)$'; r = '  معتبر تا: {0}' }
   @{ p = '^running \(pid (\d+)\)$'; r = 'در حال اجرا (شناسه {0})' }
   @{ p = '^pid (\d+), port (\d+)$'; r = 'شناسه {0}، پورت {1}' }
   @{ p = '^installed \((.+)\)$'; r = 'نصب‌شده ({0})' }
@@ -688,9 +721,18 @@ function Show-LicenseResult([string]$Text) {
 
 function Test-LicenseReady {
   if (-not (Test-LicenseSupported)) { return $false }
+  # The dashboard login is derived from the Expert licence: prepare it here so a
+  # customer who only activated the serial never meets a second licence.
+  if (-not (Test-LicenseSaved)) { $null = Sync-DashboardLogin -Quiet }
   if (-not (Test-LicenseSaved)) { return $false }
   $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
-  return ((Get-LicenseField $text 'status') -eq 'ACTIVE')
+  if ((Get-LicenseField $text 'status') -eq 'ACTIVE') { return $true }
+  # A stale login (renewed licence, another account) is rebuilt once and retried.
+  if (Sync-DashboardLogin -Quiet) {
+    $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
+    return ((Get-LicenseField $text 'status') -eq 'ACTIVE')
+  }
+  return $false
 }
 
 # Interactive gate for anything that starts the dashboard.
@@ -701,19 +743,18 @@ function Confirm-License {
     return $false
   }
   if (-not (Test-LicenseSaved)) {
-    Write-Host 'a valid Mapsim license is required to run the dashboard.'
-    $a = Read-Default 'enter the license now? (y/n)' 'y'
-    if ($a -ne 'y') {
-      Write-Host 'the dashboard was not started - the license is required (menu 12).'
+    Write-Host 'the dashboard runs on your Expert licence - preparing the login ...'
+    if (-not (Sync-DashboardLogin)) {
+      Write-Host 'the Expert licence is not active on this machine yet.'
+      Write-Host 'activate your serial in the License menu (item 4), then start the dashboard again.'
       return $false
     }
-    if (-not (Enter-License)) { return $false }
   }
   $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
   if ((Get-LicenseField $text 'status') -ne 'ACTIVE') {
     Write-Host 'the license check failed:'
     Show-LicenseResult $text
-    Write-Host 'the dashboard was not started. Fix the license in menu 12.'
+    Write-Host 'the dashboard was not started. Rebuild the login from the License menu (item 1).'
     return $false
   }
   $warning = Get-LicenseField $text 'warning'
@@ -779,27 +820,27 @@ function Show-LicenseStatus {
     return
   }
   if (-not (Test-LicenseSaved)) {
-    Write-Host 'license : not set (choose 1 to enter it)'
+    Write-Host 'dashboard login : not prepared - item 1 builds it from your Expert licence'
     return
   }
-  Write-Host 'license files:'
+  Write-Host 'dashboard login files:'
   Write-Host "  $LicenseFile"
   Write-Host "  $LicenseAuthFile"
   $text = Invoke-LicenseCheck $LicenseFile $LicenseAuthFile
   Show-LicenseResult $text
-  if ((Get-LicenseField $text 'status') -eq 'ACTIVE') { Write-Host 'license : ACTIVE' }
-  else { Write-Host 'license : NOT ACTIVE - the dashboard will not start (choose 1 to fix it)' }
+  if ((Get-LicenseField $text 'status') -eq 'ACTIVE') { Write-Host 'dashboard login : ACTIVE' }
+  else { Write-Host 'dashboard login : NOT ACTIVE - the dashboard will not start (item 1 rebuilds it)' }
 }
 
 function Remove-License {
   if (-not (Test-LicenseSaved)) { Write-Host 'no license is saved.'; return }
-  $a = Read-Default 'remove the saved license? the dashboard will not start without it (y/n)' 'n'
+  $a = Read-Default 'remove the saved dashboard login? it is rebuilt from your Expert licence on the next start (y/n)' 'n'
   if ($a -ne 'y') { Write-Host 'cancelled.'; return }
   Remove-Item $LicenseFile, $LicenseAuthFile -Force -ErrorAction SilentlyContinue
   if ((Test-Path $LicenseDir) -and -not (Get-ChildItem $LicenseDir -Force -ErrorAction SilentlyContinue)) {
     Remove-Item $LicenseDir -Force -ErrorAction SilentlyContinue
   }
-  Write-Host 'license removed.'
+  Write-Host 'the dashboard login was removed.'
 }
 
 function Show-LicenseMenu {
@@ -807,16 +848,16 @@ function Show-LicenseMenu {
     Clear-Host
     Show-Title
     Write-Host 'License'
-    Write-Host '  one menu for everything: the dashboard login and the Expert licence'
-    if (Test-LicenseSaved) { Write-Host "  saved: yes ($LicenseFile)" } else { Write-Host '  saved: no' }
+    Write-Host '  one serial for both halves: the Expert and the dashboard'
+    if (Test-LicenseSaved) { Write-Host "  dashboard login: ready ($LicenseFile)" } else { Write-Host '  dashboard login: not built yet' }
     Write-Host ('  Expert licence : ' + (Get-AgentSummary))
     Write-Host ''
-    Write-Host '  Dashboard login (username / password)'
-    Write-Host '  1) Enter / update license'
-    Write-Host '  2) Show license status'
-    Write-Host '  3) Remove saved license'
+    Write-Host '  Dashboard login (built from your Expert licence - nothing extra to buy)'
+    Write-Host '  1) Build / refresh the dashboard login now'
+    Write-Host '  2) Show the dashboard login status'
+    Write-Host '  3) Remove the saved dashboard login'
     Write-Host ''
-    Write-Host '  Expert licence (serial)'
+    Write-Host '  Expert licence (the serial from the shop)'
     Write-Host '  4) Activate the Expert with a serial'
     Write-Host '  5) Show the Expert licence status'
     Write-Host '  6) Register the MetaTrader folder (MQL5)'
@@ -826,11 +867,13 @@ function Show-LicenseMenu {
     Write-Host ' 10) Automatic refresh on / off'
     Write-Host ' 11) Remove the licence from this machine'
     Write-Host ''
+    Write-Host ' 12) Enter an old dashboard licence (only if support sent one)'
+    Write-Host ''
     Write-Host '  0) Back to the main menu'
-    $c = Read-Host "`nchoose 0-11 (0 = back)"
+    $c = Read-Host "`nchoose 0-12 (0 = back)"
     switch ($c) {
       '0' { return }
-      '1' { Enter-License | Out-Null }
+      '1' { if (Sync-DashboardLogin) { Write-Host 'the dashboard login is ready - start the dashboard from the main menu (2).' } }
       '2' { Show-LicenseStatus }
       '3' { Remove-License }
       '4' { Activate-Agent }
@@ -841,7 +884,8 @@ function Show-LicenseMenu {
       '9' { Show-AgentDevice }
       '10' { Toggle-AgentSchedule }
       '11' { Remove-AgentLease }
-      default { Write-Host 'please choose 0-11.' }
+      '12' { Enter-License | Out-Null }
+      default { Write-Host 'please choose 0-12.' }
     }
     $null = Read-Host "`nPress Enter to continue"
   }
@@ -983,6 +1027,146 @@ function Get-AgentSummary {
   return $summary
 }
 
+# ------------------------------------------------------------ derived login
+# One licence, two programs. The serial bought on the site activates the EA half
+# (the Agent holds a signed lease); the dashboard half reads its own two files,
+# dashboard.license and dashboard.auth. They used to be a second licence a
+# customer had to buy and type himself. The Agent now reports what the lease
+# already proves - user, password, account, expiry - and these functions seal
+# that into the files the installed dashboard build expects: nine fields joined
+# by a dash, AES-256-ECB with zero padding, lowercase hex. Nothing is invented
+# here: every field is checked by the dashboard against the Expert's own export,
+# so a wrong value could not unlock anything.
+
+# Like Invoke-Agent, but silent: a stale login must refresh before the dashboard
+# starts without printing an Agent report in the middle of the screen.
+function Invoke-AgentQuiet([string[]]$Arguments) {
+  $launcher = Get-AgentLauncher -Quiet
+  if (-not $launcher) { return '' }
+  $previous = $ErrorActionPreference
+  # The Agent exits non-zero by design (20 = no licence yet). With 'Stop' the
+  # redirected stderr would abort the menu instead of returning the text.
+  $ErrorActionPreference = 'Continue'
+  try {
+    $all = @($launcher.Args) + $Arguments
+    $text = (& $launcher.File @all 2>&1 | Out-String)
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+  $script:AgentSummary = $null
+  return $text
+}
+
+# Carried inside the published dashboard build, so they are not a secret stored
+# here - they are the lock the shipped program already has.
+$DashAesKey = '765BC5720769C61677895D7563GHH0TM'
+$DashActiveCode = '213250101'
+
+function Get-DashboardLoginMaterial {
+  $text = Invoke-AgentQuiet @('dashboard-login')
+  $status = Get-LicenseField $text 'status'
+  if ($status -ne 'OK') {
+    $code = Get-LicenseField $text 'code'
+    if (-not $code) { $code = 'AGENT_ERROR' }
+    $note = Get-LicenseField $text 'message'
+    if (-not $note) { $note = 'the licence Agent did not answer.' }
+    $script:DashboardLoginNote = "the Expert licence cannot open the dashboard ($code): $note"
+    return $null
+  }
+  $user = Get-LicenseField $text 'user'
+  $pass = Get-LicenseField $text 'password'
+  $account = Get-LicenseField $text 'account'
+  $expiry = Get-LicenseField $text 'expiry'
+  if (-not $user -or -not $pass -or -not $account -or -not $expiry) {
+    $script:DashboardLoginNote = 'the Agent returned an incomplete dashboard login.'
+    return $null
+  }
+  # The dashboard reads the expiry as year.month.day hour:minute.
+  if ($expiry -notmatch '^(\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2})$') {
+    $script:DashboardLoginNote = "the Agent returned an unreadable expiry ($expiry)."
+    return $null
+  }
+  return @{
+    User = $user; Password = $pass; Account = $account; Expiry = $expiry
+    Year = $Matches[1]; Month = $Matches[2]; Day = $Matches[3]
+    Hour = $Matches[4]; Minute = $Matches[5]
+  }
+}
+
+function Write-DashboardLicense($Material) {
+  $plain = @(
+    $Material.User, $Material.Password,
+    $Material.Year, $Material.Month, $Material.Day,
+    $Material.Hour, $Material.Minute,
+    $DashActiveCode, $Material.Account
+  ) -join '-'
+  $bytes = [Text.Encoding]::ASCII.GetBytes($plain)
+  $blocks = [int][Math]::Ceiling($bytes.Length / 16.0)
+  $padded = New-Object 'byte[]' ($blocks * 16)
+  [Array]::Copy($bytes, $padded, $bytes.Length)
+  $aes = [Security.Cryptography.Aes]::Create()
+  try {
+    $aes.Mode = [Security.Cryptography.CipherMode]::ECB
+    $aes.Padding = [Security.Cryptography.PaddingMode]::None
+    $aes.Key = [Text.Encoding]::ASCII.GetBytes($DashAesKey)
+    $sealed = $aes.CreateEncryptor().TransformFinalBlock($padded, 0, $padded.Length)
+  } finally {
+    $aes.Dispose()
+  }
+  $hex = ([BitConverter]::ToString($sealed) -replace '-', '').ToLowerInvariant()
+
+  New-Item -ItemType Directory -Force $LicenseDir | Out-Null
+  Set-Content -Path $LicenseFile -Value $hex -Encoding ASCII
+  Set-Content -Path $LicenseAuthFile -Value @($Material.User, $Material.Password) -Encoding ASCII
+  # The password file must stay private to this Windows account.
+  $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  & icacls $LicenseFile '/inheritance:r' '/grant:r' "${me}:(R,W)" | Out-Null
+  & icacls $LicenseAuthFile '/inheritance:r' '/grant:r' "${me}:(R,W)" | Out-Null
+}
+
+# Rebuilds the dashboard login from the active Expert licence. Returns $false and
+# leaves $script:DashboardLoginNote set when the Expert half is not ready, so the
+# caller can say why instead of asking for a licence the customer never had.
+function Sync-DashboardLogin([switch]$Quiet) {
+  $script:DashboardLoginNote = ''
+  if (-not (Install-Agent)) {
+    $script:DashboardLoginNote = 'the licence Agent is not installed.'
+    if (-not $Quiet) { Write-Host $script:DashboardLoginNote -ForegroundColor Red }
+    return $false
+  }
+  if (-not (Test-Path $AgentLeaseFile)) {
+    $script:DashboardLoginNote = 'no Expert licence is active on this machine yet.'
+    if (-not $Quiet) { Write-Host $script:DashboardLoginNote }
+    return $false
+  }
+  $material = Get-DashboardLoginMaterial
+  if (-not $material) {
+    if (-not $Quiet) { Write-Host $script:DashboardLoginNote }
+    return $false
+  }
+  try {
+    Write-DashboardLicense $material
+  } catch {
+    $script:DashboardLoginNote = "the dashboard login could not be saved - $($_.Exception.Message)"
+    if (-not $Quiet) { Write-Host $script:DashboardLoginNote -ForegroundColor Red }
+    return $false
+  }
+  if (-not (Test-LicenseSaved)) {
+    $script:DashboardLoginNote = 'the dashboard login files were not created.'
+    if (-not $Quiet) { Write-Host $script:DashboardLoginNote -ForegroundColor Red }
+    return $false
+  }
+  if (-not $Quiet) {
+    Write-Host 'the dashboard login was prepared from your Expert licence:'
+    Write-Host "  login    : $($material.User)"
+    Write-Host "  password : $($material.Password)"
+    Write-Host "  account  : $($material.Account)"
+    Write-Host "  valid to : $($material.Expiry)"
+    Write-Host '  it renews itself whenever the Expert licence is refreshed.'
+  }
+  return $true
+}
+
 function Show-AgentStatus {
   if (-not (Install-Agent)) { return }
   Write-Host ''
@@ -1034,6 +1218,8 @@ function Activate-Agent {
   }
   if ($code -eq 0) {
     Write-Host 'in MetaTrader 5: attach the Expert to a chart and allow DLL imports.'
+    # The same serial now covers the dashboard: prepare its login right away.
+    $null = Sync-DashboardLogin -Quiet
   }
 }
 
@@ -1041,7 +1227,11 @@ function Update-AgentLease {
   if (-not (Install-Agent)) { return }
   $code = Invoke-Agent @('refresh', '--force')
   switch ($code) {
-    0  { Write-Host 'the licence was refreshed.' }
+    0  {
+      Write-Host 'the licence was refreshed.'
+      # Renewal must reach the dashboard too, or it would expire before the EA.
+      $null = Sync-DashboardLogin -Quiet
+    }
     13 { Write-Host 'the licence server could not be reached - check the internet.' }
     15 { Write-Host 'this licence is revoked or suspended.' }
     16 { Write-Host 'this licence belongs to another machine.' }
@@ -1350,8 +1540,8 @@ function Start-Dashboard([string]$Bind, [int]$Port) {
     return
   }
   if (-not (Test-LicenseReady)) {
-    Write-Host 'error: a valid Mapsim license is required - the dashboard was not started.' -ForegroundColor Red
-    Write-Host 'open menu 12 (License) and enter or fix the license.'
+    Write-Host 'error: the dashboard needs an active Expert licence - it was not started.' -ForegroundColor Red
+    Write-Host 'activate your serial in menu 12 (item 4), then start the dashboard again.'
     return
   }
   if (Test-ServiceInstalled) {
@@ -1443,7 +1633,7 @@ function Show-Status {
   else { Write-Host "port $port : free" }
   Write-Host "bind      : $(Get-CurrentBind)"
   if (-not (Test-LicenseSaved)) {
-    Write-Host 'license   : not set (menu 12 - required to start)'
+    Write-Host 'license   : not built yet - the License menu (item 1) builds it from the Expert licence'
   } elseif (-not (Test-LicenseSupported)) {
     Write-Host 'license   : saved (the installed build is too old - menu 4)'
   } else {
@@ -1945,9 +2135,9 @@ function Show-Menu {
     }
     Ui-Row 'Service' $svcPlain $svcCol
     Ui-Row 'Expert' $eaPlain $eaCol
-    if (Test-LicenseSaved) { $licPlain = 'saved'; $licCol = $Green + $licPlain + $NoColor }
-    else { $licPlain = 'not set'; $licCol = $Red + $licPlain + $NoColor }
-    Ui-Row 'License' $licPlain $licCol
+    if (Test-LicenseSaved) { $licPlain = 'ready'; $licCol = $Green + $licPlain + $NoColor }
+    else { $licPlain = 'not built'; $licCol = $Red + $licPlain + $NoColor }
+    Ui-Row 'Dashboard login' $licPlain $licCol
     # The Expert's own licence: taken from the Agent, which reads it locally.
     $agentPlain = Get-AgentSummary
     if ($agentPlain -like 'ACTIVE*') { $agentCol = $Green + $agentPlain + $NoColor }
@@ -1970,7 +2160,7 @@ function Show-Menu {
     Ui-Item '9' 'Expert Advisor: install / update'
     Ui-Item '10' 'Expert Advisor: version check'
     Ui-Item '11' 'Disk space / server storage'
-    Ui-Item '12' 'License (dashboard login + Expert)'
+    Ui-Item '12' 'License (one serial: Expert + dashboard)'
     Ui-Item '13' 'Update policy (notify / auto / off)'
     Ui-Item '14' 'Exit'
     Ui-Item 'L' 'Language: FA'
@@ -2080,9 +2270,13 @@ $EaState = Join-Path $ConfigDir 'ea-state.env'
 function Get-EaLatestVersion {
   try {
     $tags = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/tags?per_page=100" -TimeoutSec 15
-    $v = $tags | Where-Object { $_.name -match '^v\d' } | ForEach-Object { $_.name }
-    if (-not $v) { return '' }
-    return ($v | Sort-Object { [version]($_.TrimStart('v')) } | Select-Object -Last 1)
+    # v213.x is the old publishing series (the V_213 builds). It is numerically
+    # larger than the current v24.x line, so it would hide every newer Expert.
+    $v = @($tags | ForEach-Object { $_.name } | Where-Object {
+        $_ -match '^v(\d+)(\.\d+){1,3}$' -and [int]$Matches[1] -lt 100
+      })
+    if ($v.Count -eq 0) { return '' }
+    return ($v | Sort-Object { [version]($_.Substring(1)) } | Select-Object -Last 1)
   } catch {
     return ''
   }
@@ -2147,8 +2341,11 @@ function Install-Ea([string]$Version) {
     $pkg = Join-Path $root.FullName 'Expert\Meta_trader_5'
     if (-not (Test-Path $pkg)) { throw "the $Version package has no Expert folder." }
     # The published package carries the Windows builds under the sub folders; the
-    # newest one is the last by name, not the first one found.
+    # newest one is the last by name, not the first one found, and a 64-bit build
+    # always beats a 32-bit one.
     $winBuilds = @(Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Where-Object { $_.Name -match 'win' } | Sort-Object Name)
+    $win64 = @($winBuilds | Where-Object { $_.Name -match '64' })
+    if ($win64.Count -gt 0) { $winBuilds = $win64 }
     $ex5 = $winBuilds | Select-Object -Last 1
     if (-not $ex5) {
       $ex5 = Get-ChildItem $pkg -Recurse -Filter '*.ex5' | Sort-Object Name | Select-Object -Last 1
@@ -2203,7 +2400,8 @@ function Install-Ea([string]$Version) {
   Write-Host '  1) restart MetaTrader 5'
   Write-Host '  2) allow DLL imports in the EA options'
   Write-Host '  3) attach the Mapsim Assistance Bot Expert to your chart'
-  Write-Host '  4) enter your license (from the Mapsim Bot in Telegram)'
+  Write-Host '  4) activate your serial in the License menu (item 4)'
+  Write-Host '  5) the same serial opens the dashboard (main menu - 2)'
 }
 
 function Show-EaStatus {

@@ -1,5 +1,9 @@
 ## Mapsim Assistance Bot
 
+> **First time here? Start with [`START_HERE.md`](START_HERE.md)** — the complete
+> first-run tutorial (English and Persian): install, buy the serial, activate it,
+> run the Expert and open the dashboard.
+
 - Mapsim Assistance Bot is an innovative solution designed to enhance your trading experience in MetaTrader 5. It combines hardware and software to provide seamless and efficient market interactions.
 
 -  This product consists of three main components:
@@ -58,89 +62,54 @@ An Expert Advisor (EA) for MetaTrader 5.
 Helps automate and streamline trading actions using the Mapsim Device.
 
 
-## Installation and Setup
+## Getting started (5 steps)
 
-**Step 1: Download the Expert Advisor**
+> **The full walkthrough is [`START_HERE.md`](START_HERE.md)** - English and
+> Persian, with a troubleshooting table. This is the same journey in short.
 
-Navigate to the File section on this repository.
-Download the latest version of the Mapsim Assistance Bot Expert file.
+**1. Install the control centre** - one line; it installs the dashboard too:
 
-OR
+```powershell
+# Windows 10/11 (PowerShell)
+irm https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.ps1 | iex
+```
 
-* Download **[Zip File Expert](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/archive/refs/heads/main.zip)**
+```sh
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/MAPSIM-co/Mapsim_Assistance_Bot/main/Dashboard_Release/install.sh | sh
+```
 
----
+From then on the command `Mapsim_BOT` opens the menu (bilingual: press **L**).
 
-**Step 2: Install the Expert Advisor**
+**2. Install the Expert** - in the menu choose `9) Expert Advisor: install /
+update`. It finds your MetaTrader 5 folder and copies the Expert, the SQLite
+library and the sounds into place. Restart MetaTrader 5, attach the Expert to a
+chart and allow DLL imports and algorithmic trading.
 
-* Open MetaTrader 5.
-* Go to File → Open Data Folder.
-* Navigate to :
+**3. Buy the licence** - <https://shop.mapsim.shop> → sign up → top up the wallet
+with USDT (TRC20 / ERC20 / BEP20, plus the transaction id) → choose a plan on
+`/plans` → the **serial** appears immediately on `/app/licences` (press
+*Reveal*).
 
-  **Metatrader5/MQL5** 
+**4. Activate the serial** - `Mapsim_BOT` → **License** → `4) Activate the Expert
+with a serial`. The menu registers your MetaTrader folder, binds the serial to
+this machine, and **derives the dashboard login from the same licence**.
 
-Now copy the files from the downloaded package into the correct folders:
+**5. Start both** - the Expert shows ACTIVE on the chart; `Mapsim_BOT` → `2) Start
+dashboard` opens <http://127.0.0.1:8765>. If the browser asks for a username and
+password, use the dashboard login the menu printed (the same value in both
+boxes); `License → 1` prints it again at any time.
 
-* 📂 **Experts** → copy file inside Experts → to → **MQL5/Experts/**
+### Mapsim Device (hardware)
 
-  * ⚠️ Important:(maCOS / Windows Folders)
+The USB device and its software are a separate download:
 
-      **If you are on Windows (32/64 bit) or macOS, make sure to copy the Expert file that matches your operating system into the MQL5/Experts/File.**
+* Windows - [Mapsim_Device_Settings_And_Installation_For_Windows7](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_Windows7)
+* macOS - [Mapsim_Device_Settings_And_Installation_For_MACOS](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_MACOS)
 
-* 📂 **Libraries** → copy file inside Libraries → to → **MQL5/Libraries/**
-* 📂 **Sounds** → copy **(Mapsim_Assistance_Bot)** folder inside this → to → **MetaTrader 5/Sounds/**
-
-* Restart MetaTrader 5 to load the Expert Advisor.
-
-  * If you Not Install Meta Trader 5 In Your OS , You Can Download Free Meta Trader 5 From **[here](https://www.metatrader5.com/en/download)**
-
----
-
-**Step 3: Set Up the Mapsim Device Software Setting**
-
-Download and install the Mapsim Device Software Setting from here:
-
-* [From Windows](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_Windows7)
-
-* [From mcOS](https://github.com/MAPSIM-co/Mapsim_Device_Settings_And_Installation_For_MACOS)
-
-
-Connect the Mapsim Device to your computer via USB.
-
-* Installation USB Driver For Windows 32 or 64 Bit In The Zip File
-
-
-Launch the software before starting MetaTrader 5.
-
----
-
-**Step 4: Get The License Expert**
-
-- Go to [Mapsim Bot](https://telegram.me/Tarantula_trade_chBot?start=5580469558)
-
-* Go to Account Status Menu 
-
-  * Follow Bot Commands 
-
-* Insert Your SERIAL NUMBER in The Your Mapsim Device **(QR Code & Barcod & Text)**
-
-* Add you Account Number from the your Broker
-
-     - (🚨 You Can ONLY Get 2 Licenses Per Device On Your Broker Account Number 🚨)
-
-* Send your Request 
-
-- [Receive Your License] 
-
-- [Insert your License To Expert In MetaTrader 5]
-
-* Activation Mapsim Assistance Bot 
-
-**You Can After Make your License,Go to This Link for watch Active License:**
-
-   [Watch Active Your License ](https://mapsimco.sbs/login.php)
-
- - You can Entery From Site By Your User Name And Password From Bot
+Connect the device and launch its software before starting MetaTrader 5; the
+Expert talks to it over USB. Buying and activating the licence does not involve
+the device.
 
 ---
 
@@ -206,20 +175,19 @@ The same actions are also available as installer flags (`--public`,
 `--service`, `--remove-service`, `--uninstall`) — see
 [`Dashboard_Release/README.md`](Dashboard_Release/README.md):
 
-- **Enter your license (required)** — the dashboard runs on the same license as
-  the Expert Advisor. The `Mapsim_BOT` license item (13 on macOS/Linux, 12 on
-  Windows) takes the license code, username and password and validates them
-  like the EA (active code, expiry, account number from the live snapshot).
-  Without a valid license the dashboard does not start, and the web sign-in is
-  the license username and password.
-- **Activate the Expert with your serial** — the same license item carries the
-  Expert half: **4)** activate with the serial (the menu registers your
-  MetaTrader folder first, otherwise the Expert reports `NO LEASE`), **5)**
-  status, **7)** refresh now, **10)** hourly automatic refresh,
-  **11)** remove it from this machine. The serial decides which licence you
-  bought — assistant (every phase-one feature except automatic trading) or full
-  — so the menu never asks you to pick a model, and the licence Agent is
-  downloaded on first use: `Mapsim_BOT` stays the only menu a customer needs.
+- **One licence for the Expert and the dashboard** — the serial bought on
+  <https://shop.mapsim.shop> activates the Expert (`License → 4`, which also
+  registers your MetaTrader folder first, otherwise the Expert reports
+  `NO_LEASE`), and the menu then **builds the dashboard login from that same
+  licence** (`License → 1` shows or refreshes it, `2` shows its status). There is
+  no second licence to buy and nothing to type twice; the dashboard's web
+  sign-in is that derived login. `5` shows what the Expert sees, `6` registers
+  another MetaTrader folder, `7` refreshes the licence now (after a renewal),
+  `10` turns the automatic refresh on or off, `11` removes it from this machine.
+  The serial decides which product you bought - assistant (every phase-one
+  feature except automatic trading) or full - so the menu never asks you to pick
+  a model, and the licence Agent is downloaded on first use: `Mapsim_BOT` stays
+  the only menu a customer needs.
 - **Watch the dashboard from the internet / other devices** — run `Mapsim_BOT`
   and choose **7) Access mode (local / internet)** (or reinstall with
   `--public` / `-Public`): it binds to all network interfaces and asks for the
@@ -261,7 +229,12 @@ The same actions are also available as installer flags (`--public`,
   `install.ps1 -Uninstall`) deletes the app, the auto-start service, the saved
   license and all logs. Nothing touches MetaTrader 5.
 
-### Download
+### Download (advanced / offline install)
+
+> The one-command install above is the supported path: the control centre also
+> builds the dashboard login from your Expert licence, which a bare zip cannot.
+> If you unpack a release by hand, run `Mapsim_BOT → License → 1` once before
+> starting the dashboard.
 
 Open the [**Releases**](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/releases/latest)
 page and download the build for your system:
@@ -317,16 +290,17 @@ Full details, build instructions and troubleshooting: [`Dashboard_Release/README
 
 ## Requirements
 
-- Operating System: Windows 32/64 Bit or later And macOS
+- Operating System: Windows 10/11 (64-bit) or macOS 12+ / 64-bit Linux
 
 - Driver Mapsim Device For Windows 32/64 Bit
 
-- Mapsim Device Assistance Bot (213-*) Version
+- Mapsim Device (hardware, optional) — the licence does not depend on it
 
-- License Activation Key
-  
-- MetaTrader Version: MetaTrader 5
-  
+- Licence serial from <https://shop.mapsim.shop> — one serial covers the Expert
+  and the dashboard
+
+- MetaTrader Version: MetaTrader 5 (64-bit)
+
 - Hardware Interface: USB
 
 ---
@@ -334,7 +308,8 @@ Full details, build instructions and troubleshooting: [`Dashboard_Release/README
 
   This Expert Advisor is a highly customizable Forex Trading EA that provides advanced risk management, partial close features,momentum control, and visual feedback on the chart.
 
-- Version V213.1.6 is Run ...
+- Version V24.0.29 is the current build; `Mapsim_BOT → 9` installs the newest
+  release and `10` tells you when a newer one exists.
 
   ## 🔹 Key Features
   
@@ -372,13 +347,10 @@ Full details, build instructions and troubleshooting: [`Dashboard_Release/README
 
 ## Support
 
-For technical support or inquiries, please contact:
-
-Email: **support@mapsimco.sbs**
-
-Website: **www.mapsimco.sbs**
-
-Telegram: [**Mapsim Bot**](https://telegram.me/Tarantula_trade_chBot?start=5580469558)
+- Shop, licence panel and renewals: **<https://shop.mapsim.shop>**
+- Issues and questions: **[GitHub issues](https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/issues)**
+- Telegram: [**@Tarantula_trade**](https://t.me/Tarantula_trade)
+- Email: **support@mapsimco.sbs**
 
 ## License 
 

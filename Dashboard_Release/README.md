@@ -141,22 +141,24 @@ you can copy it), whether the live snapshot file is being read
                                      `C:` and other drive letters are mapped to the
                                      detected Wine prefix and `MQL5/Files/MapsimLive/
                                      snapshot.json` is derived from it
- 13) License (dashboard login +    - a submenu with two halves, both yours:
-     Expert)
-                                       1-3 enter or update the dashboard login
-                                           (license code + username + password),
+ 13) License (one serial: Expert  - a submenu with two halves of one licence:
+     + dashboard)
+                                       1-3 the dashboard login, derived from the
+                                           Expert licence: build or refresh it,
                                            show its status (user, account,
-                                           expiry, days left) or remove it. The
+                                           expiry, days left) or remove it (it is
+                                           rebuilt on the next start). The
                                            dashboard only starts with a valid,
-                                           unexpired license and uses the same
-                                           username and password for the web
-                                           sign-in
+                                           unexpired licence and uses that login
+                                           for the web sign-in
                                       4-11 the Expert licence (serial): activate
                                            with the serial, status, register the
                                            MetaTrader folder, refresh now,
                                            verify, device identity, automatic
                                            refresh on/off, remove it from this
                                            machine
+                                      12   an old, separate dashboard licence -
+                                           only for customers support sent one to
  14) Update policy (notify/auto/off)- how a newer dashboard release is handled
                                      (see **Dashboard updates** below)
  15) Exit
@@ -168,7 +170,7 @@ you can copy it), whether the live snapshot file is being read
                                      survives an update
 
 The Windows menu (`mapsim-menu.ps1`) has no separate snapshot item, so the
-numbering there shifts up by one: **12) License (dashboard login + Expert)**,
+numbering there shifts up by one: **12) License (one serial: Expert + dashboard)**,
 **13) Update policy** and **14) Exit**. Every other option number is the same on
 all platforms.
 
@@ -203,29 +205,36 @@ it from menu 3 stops the service too so nothing restarts behind your back.
 Installing, starting and restarting through the service check the license too —
 without a valid license the service is not started.
 
-### License
+### License (one serial: Expert + dashboard)
 
-The dashboard runs on the **same license as the Expert Advisor**. Enter it once
-in menu **13**: paste the license code, then the license username and password
-(typed hidden). The values are validated like the EA does — username, password,
-active code, expiry date and the account number read from the live snapshot —
-and are only saved when the license is active. They are stored in
-`~/.mapsim/dashboard.license` and `~/.mapsim/dashboard.auth`
-(`%USERPROFILE%\.mapsim\...` on Windows), readable only by your account.
+The dashboard and the Expert run on **one licence**: the serial bought on
+<https://shop.mapsim.shop>. Nothing about the dashboard is bought separately and
+nothing is typed twice.
 
-- No license, an expired license, a wrong username/password or another account
-  in the snapshot → the dashboard is **not started**.
-- If the license expires while the dashboard is running, it shuts itself down.
-- The web sign-in (local and internet) is the license username and password.
+- **The Expert half** is items **4-11** of the License menu. It reads a signed
+  lease that the licence Agent keeps in `~/.mapsim` and copies into
+  `<MQL5>/Files/MapsimLive`.
+- **The dashboard half** is derived from that lease. Items **1-3** ask the Agent
+  for the values the lease already proves (user, password, account, expiry) and
+  seal them into `~/.mapsim/dashboard.license` and `~/.mapsim/dashboard.auth`
+  (`%USERPROFILE%\.mapsim\...` on Windows), readable only by your account. The
+  installed build re-checks those values against the Expert's own export -
+  username, active code, expiry against the **broker clock** and the account
+  number from the live snapshot - so a wrong, stale or copied file unlocks
+  nothing.
+- The login is rebuilt automatically after every activation (item 4), after
+  every refresh or renewal (item 7) and on every dashboard start when the saved
+  one no longer verifies, so it can never quietly fall behind the Expert.
+- Item **12** keeps the old separate dashboard licence for customers support
+  sent one to; a new customer never needs it.
+
+- No licence, an expired licence, a mismatch or another account in the snapshot
+  → the dashboard is **not started**.
+- If the licence expires while the dashboard is running, it shuts itself down.
+- The web sign-in (local and internet) is the derived dashboard login - the same
+  value in the username and password boxes. `License → 1` prints it again.
 - If the snapshot is not there yet, the dashboard starts with a warning and
   enforces the account number as soon as the snapshot appears.
-
-#### The Expert licence (serial)
-
-Items **4-11** of menu 13 manage the Expert's own licence - the serial key you
-were sold. It is a different credential from the dashboard login: the Expert
-reads its lease from `<MQL5>/Files/MapsimLive`, so the two can be set up in the
-same place without being the same thing.
 
 There are exactly two products and one menu. The serial knows which product it
 was sold as (assistant: every phase-one feature except automatic trading, or
@@ -234,7 +243,8 @@ asks you to choose one - so the same key and the same items work for both.
 
 - **4) Activate** is the only step a new customer needs. On the first run the
   menu registers the MetaTrader folder (item 6 does it on its own), asks for the
-  serial, activates and copies the lease into every terminal it found.
+  serial, activates, copies the lease into every terminal it found and then
+  builds the dashboard login from that lease.
 - Without that folder the lease stays in `~/.mapsim` and the Expert reports
   `NO LEASE` - a missing path, not a broken key.
 - **10) automatic refresh** installs an hourly job (Task Scheduler, systemd user

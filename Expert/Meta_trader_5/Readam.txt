@@ -1,25 +1,33 @@
-This Expert Run in Metatrader 5
-# MACos
----------------------------------------
-Add Libraries Folder to MT5
-Add Sounds Folder to MT5
-Add Last Expert File To MT5 (Expert Folder)
-Allow DLL in the Expert
-Entery Liccense And Username , Password 
-Run Mapsim Device APP
-Set Your Config (Managment Risk , Managmet Mony , ...)
-Enjoy ...
+Mapsim Assistance Bot - Expert (Mapsim_Assistance_Bot.ex5)
+=======================================================================
 
-# Windows 
-----------------------------------------
-Add Libraries Folder to MT5
-Add Sounds Folder to MT5
-Add Expert File To MT5 (Expert Folder)
-Allow DLL in the Expert
-********************************************************
-*    Import : (This Option Active For WIN 64 bit)      *
-********************************************************
-Entery Liccense And Username , Password 
-Run Mapsim Device APP
-Set Your Config (Managment Risk , Managmet Mony , ...)
-Enjoy ...
+You do NOT copy these files by hand. The Mapsim_BOT control centre installs
+them for you (menu 9) and then activates the licence.
+
+Full walkthrough, English and Persian:
+  https://github.com/MAPSIM-co/Mapsim_Assistance_Bot/blob/main/START_HERE.md
+
+# Manual install (only if you cannot run Mapsim_BOT)
+-----------------------------------------------------------------------
+MACos and Windows:
+  Libraries/            -> MQL5/Libraries        (sqlite3.dll)
+  Sounds/               -> MQL5/Files            (Mapsim_Assistance_Bot/Sounds/*.wav)
+  Include (.zip)        -> MQL5/Include
+  the Expert file       -> MQL5/Experts
+
+Then restart MetaTrader 5, allow DLL imports in the Expert properties, turn
+the Algo Trading button on, and attach the Expert to a chart.
+
+# Licence - one serial for the Expert and the dashboard
+-----------------------------------------------------------------------
+Do not type a username or password into the Expert. Buy the serial on
+https://shop.mapsim.shop and activate it once, from the menu:
+
+  Mapsim_BOT  ->  License  ->  4) Activate the Expert with a serial
+
+The menu registers your MetaTrader folder, binds the serial to this machine
+and builds the dashboard login from the same licence (License -> 1 prints
+it again). There is no second licence and nothing to enter twice.
+
+Run Mapsim Device APP (optional hardware), set your config
+(risk management, money management, ...), then enjoy.

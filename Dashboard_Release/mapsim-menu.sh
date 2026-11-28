@@ -23,7 +23,7 @@ FALLBACK_VERSION="dashboard-v1.0.9"
 # on the same number never sees the fix: refresh_menu_self only replaces the file
 # when the published value is greater. It is kept equal to $MapsimMenuVersion in
 # mapsim-menu.ps1, because both platforms ship the same fixes.
-MENU_VERSION=1.2.1
+MENU_VERSION=1.2.2
 MENU_URL="https://raw.githubusercontent.com/$REPO/main/Dashboard_Release/mapsim-menu.sh"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
@@ -681,31 +681,27 @@ license_show_result() {
   return 0
 }
 
-# Interactive gate for anything that starts the dashboard. Offers to enter a
-# license when none is saved, and refuses when the license is invalid.
+# Interactive gate for anything that starts the dashboard. Rebuilds the login
+# from the Expert licence when there is none, and refuses when it is invalid.
 license_prepare() {
   if ! license_supported; then
     echo "the installed dashboard build does not support the license yet."
-    echo "update it from menu 4 (Install / update dashboard), then enter the license (menu 13)."
+    echo "update it from menu 4 (Install / update dashboard), then try again."
     return 1
   fi
   if ! license_saved; then
-    echo "a valid Mapsim license is required to run the dashboard."
-    a=$(ask_default "y" "enter the license now? (y/n, 0 = back)")
-    if wants_back "$a"; then
+    echo "the dashboard runs on your Expert licence - preparing the login ..."
+    if ! dashboard_login_sync; then
+      echo "the Expert licence is not active on this machine yet."
+      echo "activate your serial in the License menu (item 4), then start the dashboard again."
       return 1
     fi
-    if [ "$a" != "y" ] && [ "$a" != "Y" ]; then
-      echo "the dashboard was not started - the license is required (menu 13)."
-      return 1
-    fi
-    menu_license_enter || return 1
   fi
   out=$(license_check_saved)
   if [ "$(license_field "$out" status)" != "ACTIVE" ]; then
     echo "the license check failed:"
     license_show_result "$out"
-    echo "the dashboard was not started. Fix the license in menu 13."
+    echo "the dashboard was not started. Rebuild the login from the License menu (item 1)."
     return 1
   fi
   warning=$(license_field "$out" warning)
@@ -715,10 +711,16 @@ license_prepare() {
   return 0
 }
 
-# Non-interactive variant used by start_dashboard itself.
+# Non-interactive variant used by start_dashboard itself. A stale login
+# (renewed licence, another account) is rebuilt once and retried.
 license_ready() {
   license_supported || return 1
-  license_saved || return 1
+  if ! license_saved; then
+    dashboard_login_sync quiet || return 1
+  fi
+  out=$(license_check_saved)
+  [ "$(license_field "$out" status)" = "ACTIVE" ] && return 0
+  dashboard_login_sync quiet || return 1
   out=$(license_check_saved)
   [ "$(license_field "$out" status)" = "ACTIVE" ]
 }
@@ -787,18 +789,18 @@ menu_license_status() {
     return
   fi
   if ! license_saved; then
-    echo "license : not set (choose 1 to enter it)"
+    echo "dashboard login : not prepared - item 1 builds it from your Expert licence"
     return
   fi
-  echo "license files:"
+  echo "dashboard login files:"
   echo "  $LICENSE_FILE"
   echo "  $LICENSE_AUTH_FILE"
   out=$(license_check_saved)
   license_show_result "$out"
   if [ "$(license_field "$out" status)" = "ACTIVE" ]; then
-    echo "license : ACTIVE"
+    echo "dashboard login : ACTIVE"
   else
-    echo "license : NOT ACTIVE - the dashboard will not start (choose 1 to fix it)"
+    echo "dashboard login : NOT ACTIVE - the dashboard will not start (item 1 rebuilds it)"
   fi
 }
 
@@ -807,7 +809,7 @@ menu_license_remove() {
     echo "no license is saved."
     return
   fi
-  a=$(ask_default "n" "remove the saved license? the dashboard will not start without it (y/n, 0 = back)")
+  a=$(ask_default "n" "remove the saved dashboard login? it is rebuilt from your Expert licence on the next start (y/n, 0 = back)")
   if wants_back "$a"; then
     return
   fi
@@ -817,7 +819,7 @@ menu_license_remove() {
   esac
   rm -f "$LICENSE_FILE" "$LICENSE_AUTH_FILE"
   rmdir "$LICENSE_DIR" 2>/dev/null || true
-  echo "license removed."
+  echo "the dashboard login was removed."
 }
 
 # ---------------------------------------------------------------- licence agent
@@ -960,6 +962,142 @@ agent_status() {
   AGENT_SUMMARY=""
 }
 
+# ------------------------------------------------------------ derived login
+# One licence, two programs - the same bridge the Windows menu uses. The serial
+# activates the Expert half (the Agent holds a signed lease); the dashboard half
+# reads dashboard.license and dashboard.auth, which used to be a second licence
+# a customer had to buy and type himself. Here the Agent reports what the lease
+# already proves and the menu seals it in the form the installed build expects:
+# nine fields joined by a dash, AES-256-ECB, zero padding, lowercase hex.
+# Nothing is invented - the dashboard re-checks every field against the Expert's
+# own export, so a wrong value could not unlock anything.
+
+# Carried inside the published dashboard build: the lock it already has.
+DASH_AES_KEY='765BC5720769C61677895D7563GHH0TM'
+DASH_ACTIVE_CODE='213250101'
+DASHBOARD_NOTE=""
+
+# Silent Agent call: a stale login must refresh before the dashboard starts
+# without printing an Agent report in the middle of the screen.
+agent_quiet() {
+  if [ -x "$AGENT_BIN" ]; then
+    "$AGENT_BIN" "$@" 2>&1
+  elif [ -f "$AGENT_PY" ]; then
+    py=$(agent_python) || return 0
+    "$py" "$AGENT_PY" "$@" 2>&1
+  fi
+  return 0
+}
+
+dashboard_login_material() {
+  out=$(agent_quiet dashboard-login)
+  if [ "$(license_field "$out" status)" != "OK" ]; then
+    code=$(license_field "$out" code)
+    note=$(license_field "$out" message)
+    [ -z "$code" ] && code="AGENT_ERROR"
+    [ -z "$note" ] && note="the licence Agent did not answer."
+    DASHBOARD_NOTE="the Expert licence cannot open the dashboard ($code): $note"
+    return 1
+  fi
+  DL_USER=$(license_field "$out" user)
+  DL_PASS=$(license_field "$out" password)
+  DL_ACCOUNT=$(license_field "$out" account)
+  DL_EXPIRY=$(license_field "$out" expiry)
+  if [ -z "$DL_USER" ] || [ -z "$DL_PASS" ] || [ -z "$DL_ACCOUNT" ] || [ -z "$DL_EXPIRY" ]; then
+    DASHBOARD_NOTE="the Agent returned an incomplete dashboard login."
+    return 1
+  fi
+  # The dashboard reads the expiry as year.month.day hour:minute.
+  DL_YEAR=$(printf '%s' "$DL_EXPIRY" | cut -d. -f1)
+  DL_MONTH=$(printf '%s' "$DL_EXPIRY" | cut -d. -f2)
+  rest=$(printf '%s' "$DL_EXPIRY" | cut -d. -f3)
+  DL_DAY=${rest%% *}
+  DL_HM=${rest#* }
+  DL_HOUR=${DL_HM%%:*}
+  DL_MIN=${DL_HM##*:}
+  for v in "$DL_YEAR" "$DL_MONTH" "$DL_DAY" "$DL_HOUR" "$DL_MIN"; do
+    case "$v" in
+      ''|*[!0-9]*)
+        DASHBOARD_NOTE="the Agent returned an unreadable expiry ($DL_EXPIRY)."
+        return 1
+        ;;
+    esac
+  done
+  return 0
+}
+
+dashboard_login_write() {
+  if ! command -v openssl >/dev/null 2>&1; then
+    DASHBOARD_NOTE="openssl is required to build the dashboard login."
+    return 1
+  fi
+  plain="$DL_USER-$DL_PASS-$DL_YEAR-$DL_MONTH-$DL_DAY-$DL_HOUR-$DL_MIN-$DASH_ACTIVE_CODE-$DL_ACCOUNT"
+  key=$(printf '%s' "$DASH_AES_KEY" | od -An -tx1 | tr -d ' \n')
+  # Zero padding to the block size; the dashboard strips it after decoding.
+  pad=$(( (16 - ${#plain} % 16) % 16 ))
+  if [ "$pad" -gt 0 ]; then
+    hex=$({ printf '%s' "$plain"; dd if=/dev/zero bs=1 count="$pad" 2>/dev/null; } |
+      openssl enc -aes-256-ecb -K "$key" -nosalt -nopad 2>/dev/null |
+      od -An -tx1 | tr -d ' \n')
+  else
+    hex=$(printf '%s' "$plain" |
+      openssl enc -aes-256-ecb -K "$key" -nosalt -nopad 2>/dev/null |
+      od -An -tx1 | tr -d ' \n')
+  fi
+  if [ -z "$hex" ]; then
+    DASHBOARD_NOTE="the dashboard login could not be sealed."
+    return 1
+  fi
+  mkdir -p "$LICENSE_DIR"
+  chmod 700 "$LICENSE_DIR" 2>/dev/null || true
+  printf '%s\n' "$hex" > "$LICENSE_FILE"
+  chmod 600 "$LICENSE_FILE" 2>/dev/null || true
+  printf '%s\n%s\n' "$DL_USER" "$DL_PASS" > "$LICENSE_AUTH_FILE"
+  chmod 600 "$LICENSE_AUTH_FILE" 2>/dev/null || true
+  return 0
+}
+
+# dashboard_login_sync [quiet] - rebuild the login from the active Expert
+# licence. Returns 1 and leaves DASHBOARD_NOTE set when the Expert half is not
+# ready, so the caller can say why instead of asking for a second licence.
+dashboard_login_sync() {
+  quiet=""
+  [ "${1:-}" = "quiet" ] && quiet="1"
+  DASHBOARD_NOTE=""
+  if ! agent_install >/dev/null 2>&1; then
+    DASHBOARD_NOTE="the licence Agent is not installed."
+    [ -z "$quiet" ] && msg_err "$DASHBOARD_NOTE"
+    return 1
+  fi
+  if [ ! -f "$AGENT_LEASE" ]; then
+    DASHBOARD_NOTE="no Expert licence is active on this machine yet."
+    [ -z "$quiet" ] && echo "$DASHBOARD_NOTE"
+    return 1
+  fi
+  if ! dashboard_login_material; then
+    [ -z "$quiet" ] && echo "$DASHBOARD_NOTE"
+    return 1
+  fi
+  if ! dashboard_login_write; then
+    [ -z "$quiet" ] && msg_err "$DASHBOARD_NOTE"
+    return 1
+  fi
+  if ! license_saved; then
+    DASHBOARD_NOTE="the dashboard login files were not created."
+    [ -z "$quiet" ] && msg_err "$DASHBOARD_NOTE"
+    return 1
+  fi
+  if [ -z "$quiet" ]; then
+    echo "the dashboard login was prepared from your Expert licence:"
+    echo "  login    : $DL_USER"
+    echo "  password : $DL_PASS"
+    echo "  account  : $DL_ACCOUNT"
+    echo "  valid to : $DL_EXPIRY"
+    echo "  it renews itself whenever the Expert licence is refreshed."
+  fi
+  return 0
+}
+
 # Register the MQL5 folder. Without an entry file the lease has nowhere to go and
 # the Expert only ever sees NO_LEASE - it is a missing path, not a bad licence.
 agent_link() {
@@ -1014,7 +1152,9 @@ agent_activate() {
   AGENT_SUMMARY=""
   case "$code" in
     0) echo "activated."
-       echo "in MetaTrader 5: attach the Expert to a chart and allow DLL imports." ;;
+       echo "in MetaTrader 5: attach the Expert to a chart and allow DLL imports."
+       # The same serial covers the dashboard: prepare its login right away.
+       dashboard_login_sync quiet || true ;;
     10) echo "that serial is not valid." ;;
     11) echo "this serial was already used - ask support to move it to this machine." ;;
     12) echo "this machine could not be identified - send the device identity to support." ;;
@@ -1032,7 +1172,9 @@ agent_refresh() {
   code=$?
   AGENT_SUMMARY=""
   case "$code" in
-    0) echo "the licence was refreshed." ;;
+    0) echo "the licence was refreshed."
+       # Renewal must reach the dashboard too, or it would expire before the EA.
+       dashboard_login_sync quiet || true ;;
     13) echo "the licence server could not be reached - check the internet." ;;
     15) echo "this licence is revoked or suspended." ;;
     16) echo "this licence belongs to another machine." ;;
@@ -1199,18 +1341,20 @@ menu_license() {
     if [ -t 1 ]; then clear; fi
     show_title
     echo "License"
-    echo "  Dashboard login (username / password)"
+    echo "  one serial for both halves: the Expert and the dashboard"
     if license_saved; then
-      echo "  saved: yes ($LICENSE_FILE)"
+      echo "  dashboard login: ready ($LICENSE_FILE)"
     else
-      echo "  saved: no"
+      echo "  dashboard login: not built yet"
     fi
-    echo "  Expert licence (serial)"
-    echo "  status: $(agent_summary)"
+    echo "  Expert licence : $(agent_summary)"
     echo ""
-    echo "  1) Enter / update license"
-    echo "  2) Show license status"
-    echo "  3) Remove saved license"
+    echo "  Dashboard login (built from your Expert licence - nothing extra to buy)"
+    echo "  1) Build / refresh the dashboard login now"
+    echo "  2) Show the dashboard login status"
+    echo "  3) Remove the saved dashboard login"
+    echo ""
+    echo "  Expert licence (the serial from the shop)"
     echo "  4) Activate the Expert with a serial"
     echo "  5) Show the Expert licence status"
     echo "  6) Register the MetaTrader folder"
@@ -1219,15 +1363,18 @@ menu_license() {
     echo "  9) Show this device's identity"
     echo " 10) Turn automatic refresh on / off"
     echo " 11) Remove the licence from this machine"
+    echo ""
+    echo " 12) Enter an old dashboard licence (only if support sent one)"
+    echo ""
     echo "  0) Back to the main menu"
-    printf '\n%s' "${CYAN}choose 0-11 (0 = back):${NC} "
+    printf '\n%s' "${CYAN}choose 0-12 (0 = back):${NC} "
     if ! IFS= read -r c; then
       echo ""
       exit 0
     fi
     case "$c" in
       0|b|B|back|q|Q|quit) return ;;
-      1) menu_license_enter ;;
+      1) if dashboard_login_sync; then echo "the dashboard login is ready - start the dashboard from the main menu (2)."; fi ;;
       2) menu_license_status ;;
       3) menu_license_remove ;;
       4) agent_activate ;;
@@ -1238,7 +1385,8 @@ menu_license() {
       9) agent_device ;;
       10) agent_schedule ;;
       11) agent_remove ;;
-      *) echo "please choose 0-11." ;;
+      12) menu_license_enter ;;
+      *) echo "please choose 0-12." ;;
     esac
     printf '%s' "${CYAN}Press Enter to continue...${NC}"
     IFS= read -r _ || { echo ""; exit 0; }
@@ -2402,11 +2550,15 @@ EA_STATE="$CONFIG_DIR/ea-state.env"
 ea_latest_version() {
   tags=$(curl -fsSL "https://api.github.com/repos/$REPO/tags?per_page=100" 2>/dev/null \
     | grep -o '"name": *"v[0-9][^"]*"' | sed 's/.*"name": *"\([^"]*\)"/\1/') || true
+  # v213.x is the old publishing series (the V_213 builds). It is numerically
+  # larger than the current v24.x line, so it would hide every newer Expert.
+  tags=$(printf '%s\n' "$tags" | grep -E '^v[0-9]+(\.[0-9]+){1,3}$' \
+    | awk -F. 'substr($1, 2) + 0 < 100') || true
   if [ -z "$tags" ]; then
     echo ""
     return
   fi
-  echo "$tags" | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | sed 's/^/v/'
+  printf '%s\n' "$tags" | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | sed 's/^/v/'
 }
 
 ea_installed_version() {
@@ -2427,7 +2579,8 @@ ea_find_mql5() {
 
 # Pick the right .ex5 for this OS from the extracted package root. A package
 # carries several builds (Win-32bit, Win 64bit, macOS) inside sub folders, so the
-# first one found is not the newest: pick the last by name and say what was found.
+# first one found is not the newest. The version lives in the file name and a
+# 64-bit Windows build always beats a 32-bit one.
 ea_pick_expert() {
   src="$1"
   case "$OS" in
@@ -2444,13 +2597,22 @@ ea_pick_expert() {
     builds="$all"
     echo "note: no '$pref' build found - using the newest build available" >&2
   fi
+  if [ "$OS" != "Darwin" ]; then
+    sixtyfour=$(printf '%s\n' "$builds" | grep -F '64' || true)
+    if [ -n "$sixtyfour" ]; then
+      builds="$sixtyfour"
+    fi
+  fi
   if [ "$(printf '%s\n' "$builds" | wc -l | tr -d ' ')" -gt 1 ]; then
     echo "'$pref' builds in this package:" >&2
     printf '%s\n' "$builds" | while IFS= read -r b; do
       echo "  $(basename "$b")  ($(wc -c < "$b" | tr -d ' ') bytes)" >&2
     done
   fi
-  picked=$(printf '%s\n' "$builds" | tail -n 1)
+  # Sort by file name, not by path: 'Win -64bit' sorts before 'Win-32bit'.
+  picked=$(printf '%s\n' "$builds" | while IFS= read -r b; do
+    printf '%s\t%s\n' "$(basename "$b")" "$b"
+  done | LC_ALL=C sort | tail -n 1 | cut -f 2-)
   if [ "$OS" != "Darwin" ]; then
     case "$picked" in
       *64*) : ;;
@@ -2619,7 +2781,8 @@ ea_install() {
   echo "  1) restart MetaTrader 5"
   echo "  2) allow DLL imports in the EA options"
   echo "  3) attach the Mapsim Assistance Bot Expert to your chart"
-  echo "  4) enter your license (from the Mapsim Bot in Telegram)"
+  echo "  4) activate your serial in the License menu (item 4)"
+  echo "  5) the same serial opens the dashboard (main menu - 2)"
 }
 
 menu_ea_install() {
@@ -3213,10 +3376,10 @@ menu_main() {
       snap_col="${RED}$snap_plain${NC}"
     fi
     if license_saved; then
-      lic_plain="saved"
+      lic_plain="ready"
       lic_col="${GREEN}$lic_plain${NC}"
     else
-      lic_plain="not set"
+      lic_plain="not built"
       lic_col="${RED}$lic_plain${NC}"
     fi
     # The Expert's own licence: taken from the Agent, which reads it locally.
@@ -3247,7 +3410,7 @@ menu_main() {
     ui_row "Version" "$ver_plain" "$ver_col"
     ui_row "Service" "$svc_plain" "$svc_col"
     ui_row "Expert" "$ea_plain" "$ea"
-    ui_row "License" "$lic_plain" "$lic_col"
+    ui_row "Dashboard login" "$lic_plain" "$lic_col"
     ui_row "Expert lic" "$agent_plain" "$agent_col"
     ui_row "Access" "$acc" "${CYAN}$acc${NC}"
     ui_row "URL" "$(access_url)"
@@ -3266,7 +3429,7 @@ menu_main() {
     ui_item "10" "Expert Advisor: version check"
     ui_item "11" "Disk space / server storage"
     ui_item "12" "Snapshot file / data source"
-    ui_item "13" "License (dashboard login + Expert)"
+    ui_item "13" "License (one serial: Expert + dashboard)"
     ui_item "14" "Update policy (notify / auto / off)"
     ui_item "15" "Exit"
     ui_bottom
