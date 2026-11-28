@@ -26,7 +26,7 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.3.1'
+$MapsimMenuVersion = '1.3.2'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 
 # raw.githubusercontent.com keeps serving the previous file for a few minutes
@@ -599,6 +599,10 @@ $script:FaRules = @(
   @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC - expired$'; r = '{0} به وقت جهانی — منقضی' }
   @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC\s+\((\d+) day\(s\) left\)$'; r = '{0} به وقت جهانی ({1} روز باقی‌مانده)' }
   @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC \((\d+) day\(s\)\)$'; r = '{0} به وقت جهانی ({1} روز)' }
+  # The dashboard's own answer carries the local date, so it has no UTC suffix
+  # and the two rules above miss it. This row is where a Persian customer used
+  # to read a date followed by the English "(365 day(s) left)".
+  @{ p = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+\((\d+) day\(s\) left\)$'; r = '{0} — {1} روز باقی‌مانده' }
   @{ p = '^(\d+) of 8 - no automatic entry$'; r = '{0} از ۸ — بدون ورود خودکار' }
   @{ p = '^(\d+) of 8$'; r = '{0} از ۸' }
   @{ p = '^License valid for (\d+) day\(s\)\.$'; r = 'لایسنس تا {0} روز دیگر معتبر است.' }

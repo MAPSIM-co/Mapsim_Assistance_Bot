@@ -51,7 +51,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-AGENT_VERSION = "2.2.0"
+AGENT_VERSION = "2.2.1"
 AGENT_NAME = "mapsim-license-agent"
 
 # Architecture 3.3 / 5.5: the EA enforces the span, the Agent writes inside it.
@@ -799,7 +799,17 @@ class Verdict:
 
     @property
     def days_left(self) -> int:
-        return max(0, (self.valid_until - now_ts()) // 86400)
+        """Calendar days between today and the end of the licence, UTC.
+
+        It used to be whole 24 h periods, which read one day short for the
+        whole of the first day: a licence bought for 365 days showed 364 a
+        minute after it was issued, and the dashboard build - which counts
+        calendar days - showed 365 for the same date. Two numbers for one
+        date on two screens of one product look like a broken validity read,
+        so both halves now count the way a customer does: the last day is 0,
+        tomorrow is 1.
+        """
+        return max(0, int(self.valid_until // 86400 - now_ts() // 86400))
 
     @property
     def lease_days(self) -> int:
