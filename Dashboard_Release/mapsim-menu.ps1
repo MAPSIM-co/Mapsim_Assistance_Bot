@@ -26,18 +26,29 @@ $Repo = 'MAPSIM-co/Mapsim_Assistance_Bot'
 # Bumped whenever this file changes in a way an installed copy must receive: at
 # start the menu compares this number with the copy published on main and
 # replaces its own installed file when that one is newer (Update-MenuSelf).
-$MapsimMenuVersion = '1.3.3'
+$MapsimMenuVersion = '1.3.4'
 $MenuUrl = "https://raw.githubusercontent.com/$Repo/main/Dashboard_Release/mapsim-menu.ps1"
 
-# raw.githubusercontent.com keeps serving the previous file for a few minutes
-# after a push. Measured here: right after 1.3.1 was published, a plain fetch of
-# this menu still returned 1.3.0, so the installer and the self-update below both
-# gave the customer the old build and reported success. The query string is part
-# of the cache key, so a fresh value goes to the origin and the newest file is
-# the one that lands. Release archives are unaffected and do not use this.
-function Get-FreshUrl([string]$Url) {
-  return $Url + '?v=' + [DateTime]::UtcNow.Ticks
+# raw.githubusercontent.com can hand back the file from before the newest push
+# for up to five minutes, and a query string does not help: measured on this
+# machine, ?v=<ticks> still returned 1.3.2 several minutes after 1.3.3 was
+# pushed, while the same file addressed by commit returned 1.3.3 at once. A
+# file pinned to a commit is immutable, so one API call removes the window.
+# When the API cannot be reached the plain main URL is used, which is what this
+# menu always did, so a rate limit or a firewall never blocks an install.
+function Get-PinnedUrl([string]$Path) {
+  $plain = "https://raw.githubusercontent.com/$Repo/main/$Path"
+  try {
+    $headers = @{ 'User-Agent' = 'Mapsim-BOT'; 'Accept' = 'application/vnd.github.sha' }
+    $raw = (Invoke-WebRequest -Uri "https://api.github.com/repos/$Repo/commits/main" -Headers $headers -TimeoutSec 10 -UseBasicParsing).Content
+    if ($raw -is [byte[]]) { $raw = [Text.Encoding]::ASCII.GetString($raw) }
+    $sha = ([string]$raw).Trim()
+    if ($sha -match '^[0-9a-f]{40}$') { return "https://raw.githubusercontent.com/$Repo/$sha/$Path" }
+  } catch { }
+  return $plain
 }
+$AgentPath = 'Agent/mapsim_license_agent.py'
+$MenuPathInRepo = 'Dashboard_Release/mapsim-menu.ps1'
 # Used only when GitHub cannot be reached at all (offline, DNS, rate limit), so
 # a first install can never land on a build older than the newest release known
 # when this file was written. It is never installed over a newer build.
@@ -1199,7 +1210,7 @@ function Install-Agent {
   $local = Get-AgentFileVersion $AgentPy
   try {
     New-Item -ItemType Directory -Force $AgentDir | Out-Null
-    $text = (Invoke-WebRequest -Uri (Get-FreshUrl $AgentUrl) -TimeoutSec 30 -UseBasicParsing).Content
+    $text = (Invoke-WebRequest -Uri (Get-PinnedUrl $AgentPath) -TimeoutSec 30 -UseBasicParsing).Content
     if (-not ($text -is [string]) -or $text -notmatch 'AGENT_VERSION') {
       throw 'the downloaded file is not the licence Agent.'
     }
@@ -2212,7 +2223,7 @@ function Update-Refresh([switch]$Force) {
 # the dashboard archive does not carry this file.
 function Update-MenuSelf {
   try {
-    $text = (Invoke-WebRequest -Uri (Get-FreshUrl $MenuUrl) -TimeoutSec 15 -UseBasicParsing).Content
+    $text = (Invoke-WebRequest -Uri (Get-PinnedUrl $MenuPathInRepo) -TimeoutSec 15 -UseBasicParsing).Content
     if (-not ($text -is [string]) -or -not $text) { return }
     if ($text -notmatch '(?m)^\$MapsimMenuVersion = ''([0-9][0-9.]*)''') { return }
     $remote = $Matches[1]

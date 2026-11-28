@@ -47,12 +47,22 @@ Write-Host 'Mapsim BOT control center bootstrap'
 Write-Host '  downloading the control center ...'
 $tmp = Join-Path ([IO.Path]::GetTempPath()) 'mapsim-menu.ps1'
 # raw.githubusercontent.com can keep serving the file from before the newest push
-# for a few minutes, so a plain fetch here installs the previous control center and
-# still succeeds. Measured: right after a release the bootstrap gave the build from
-# the commit before it. The query string is part of the cache key, so a fresh value
-# always reaches the origin. The control center does the same for its own update.
-$fresh = $MenuUrl + '?v=' + [DateTime]::UtcNow.Ticks
-Invoke-WebRequest -Uri $fresh -OutFile $tmp -TimeoutSec 60 -UseBasicParsing
+# for a few minutes, and a query string does not help: measured here, ?v=<ticks>
+# still returned the previous control center after 1.3.3 was published. A file
+# addressed by commit is immutable, so the newest commit is asked for first and
+# the download is pinned to it. Without an answer the plain main URL is used,
+# which is what this bootstrap always did - a rate limit never blocks an install.
+$menuUri = $MenuUrl
+try {
+  $headers = @{ 'User-Agent' = 'Mapsim-BOT'; 'Accept' = 'application/vnd.github.sha' }
+  $raw = (Invoke-WebRequest -Uri "https://api.github.com/repos/$Repo/commits/main" -Headers $headers -TimeoutSec 10 -UseBasicParsing).Content
+  if ($raw -is [byte[]]) { $raw = [Text.Encoding]::ASCII.GetString($raw) }
+  $sha = ([string]$raw).Trim()
+  if ($sha -match '^[0-9a-f]{40}$') {
+    $menuUri = "https://raw.githubusercontent.com/$Repo/$sha/Dashboard_Release/mapsim-menu.ps1"
+  }
+} catch { }
+Invoke-WebRequest -Uri $menuUri -OutFile $tmp -TimeoutSec 60 -UseBasicParsing
 
 $pass = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tmp, '-Bootstrap')
 if ($Public) { $pass += '-Public' }

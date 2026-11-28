@@ -23,7 +23,7 @@ FALLBACK_VERSION="dashboard-v1.0.9"
 # on the same number never sees the fix: refresh_menu_self only replaces the file
 # when the published value is greater. It is kept equal to $MapsimMenuVersion in
 # mapsim-menu.ps1, because both platforms ship the same fixes.
-MENU_VERSION=1.2.2
+MENU_VERSION=1.3.4
 MENU_URL="https://raw.githubusercontent.com/$REPO/main/Dashboard_Release/mapsim-menu.sh"
 APP_NAME="MapsimDashboard"
 MENU_CMD="Mapsim_BOT"
@@ -57,11 +57,29 @@ AGENT_PY="$AGENT_DIR/mapsim_license_agent.py"
 AGENT_BIN="$AGENT_DIR/dist/mapsim-license-agent"
 AGENT_URL="https://raw.githubusercontent.com/$REPO/main/Agent/mapsim_license_agent.py"
 
-# raw.githubusercontent.com keeps serving the previous file for a few minutes
-# after a push, so a plain fetch of the menu or the Agent can hand the customer
-# the build from before the release and still succeed. The query string is part
-# of the cache key, so a fresh value reaches the origin instead of the edge.
-fresh_url() { printf '%s?v=%s' "$1" "$(date +%s 2>/dev/null || echo 0)"; }
+# raw.githubusercontent.com can hand back the file from before the newest push
+# for a few minutes, and a query string does not help: the edge ignores it for
+# this host. A file addressed by commit is immutable, so the newest commit is
+# asked for first - that API endpoint answers with the bare sha when it is asked
+# that way - and the download is pinned to it. Without an answer the plain main
+# URL is used, which is what this file always did.
+pinned_url() {
+  local path plain sha
+  path=$1
+  plain="https://raw.githubusercontent.com/$REPO/main/$path"
+  sha=$(curl -fsSL --max-time 10 -H 'User-Agent: Mapsim-BOT' \
+    -H 'Accept: application/vnd.github.sha' \
+    "https://api.github.com/repos/$REPO/commits/main" 2>/dev/null | tr -d ' \r\n')
+  if [ ${#sha} -eq 40 ]; then
+    case "$sha" in
+      *[!0-9a-f]*) : ;;
+      *)
+        printf 'https://raw.githubusercontent.com/%s/%s/%s' "$REPO" "$sha" "$path"
+        return 0 ;;
+    esac
+  fi
+  printf '%s' "$plain"
+}
 AGENT_LEASE="$LICENSE_DIR/lease.json"
 AGENT_TIMER="mapsim-license-agent"
 AGENT_LABEL="com.mapsim.license"
@@ -915,7 +933,7 @@ agent_install() {
   fi
   mkdir -p "$AGENT_DIR" || return 1
   msg_info "checking the licence Agent ..."
-  if ! curl -fsSL --max-time 30 "$(fresh_url "$AGENT_URL")" -o "$AGENT_PY.new" 2>/dev/null; then
+  if ! curl -fsSL --max-time 30 "$(pinned_url 'Agent/mapsim_license_agent.py')" -o "$AGENT_PY.new" 2>/dev/null; then
     rm -f "$AGENT_PY.new"
     if [ -n "$local" ]; then
       msg_warn "the licence Agent could not be refreshed; version $local keeps working."
@@ -1806,7 +1824,7 @@ refresh_menu_self() {
   [ -n "${MENU_URL:-}" ] || return 0
   dest="$MENU_DEST"
   tmp="$dest.new.$$"
-  if ! curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" -o "$tmp" "$(fresh_url "$MENU_URL")" 2>/dev/null; then
+  if ! curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" -o "$tmp" "$(pinned_url 'Dashboard_Release/mapsim-menu.sh')" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null || true
     return 0
   fi
